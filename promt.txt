@@ -1,0 +1,88 @@
+Actúa como un Arquitecto de Software Senior, Lingüista Computacional especialista en Lengua Maya Yucateca (`yua`, Norma Ortográfica de Agosto de 1984) y Especialista en Procesamiento de Señales Acústicas (DSP/TTS).
+
+Vamos a actualizar nuestro proyecto existente **AccentLab Web** en `C:\Users\gersonaam\Documents\VoiceProject` hacia la **Versión 2.0 (Edición Maya Yucateco 1984 + Motor G2P + Analizador Morfosintáctico)**, manteniendo intacta la estabilidad en Windows, Python 3.13 y el límite de VRAM < 2 GB.
+
+### CONTEXTO DE ARQUITECTURA Y REGLAS LINGÜÍSTICAS ESTRICTAS
+1. **Separación de responsabilidades (G2P vs. Modelo Acústico):**
+   - El módulo **G2P (`maya_g2p_1984.py`)** define *cómo se pronuncia y estructura fonológicamente* el texto escrito bajo el Alfabeto Práctico de Agosto de 1984.
+   - El **Motor Acústico (`prosody.py`)** mide *cómo suena físicamente* el hablante (curva F0 en semitonos, formantes F1/F2, HNR/SNR y saltillos `[ʔ]`) y ahora validará si la pronunciación real coincide con la estructura fonológica esperada por el G2P.
+2. **Norma Ortográfica de Agosto de 1984 (Diferenciada de INALI 2014 y escrituras antiguas):**
+   - Consonantes simples: `b, ch, j, k, l, m, n, p, r, s, t, ts, w, x, y` (donde `x` = `/ʃ/`, `j` = `/h/`, `ts` = `/ts/`, `b` = implosiva `/ɓ/`).
+   - Consonantes glotalizadas (eyectivas): `ch', k', p', t', ts'`.
+   - **Normalizador automático a 1984:** Si el usuario o una fuente externa introduce grafías pre-1984 o variantes no estándar (ej. `tz` -> `ts`, `tz'` -> `ts'`, `dz` -> `ts'`, `c` ante `a/o/u` en raíces mayas o apóstrofos curvos `’`/`‘`/`ʼ` -> `'`), el normalizador debe convertirlas al estándar estricto de 1984.
+3. **REGLA CRÍTICA DEL APÓSTROFO (`'`): PROHIBIDO REEMPLAZAR APÓSTROFOS POR PAUSAS.**
+   El motor G2P debe analizar el contexto grafémico con precedencia estricta para clasificar cada apóstrofo en uno de 4 fenómenos fonológicos distintos antes de fonemizar:
+   - **Tipo 1 — Consonante Glotalizada / Eyectiva (`C'`):** Dígrafos/trígrafos indivisibles `ch'`, `ts'`, `k'`, `p'`, `t'` -> fonemas `/tʃʼ/`, `/tsʼ/`, `/kʼ/`, `/pʼ/`, `/tʼ/` (Tokens: `CH_EJ`, `TS_EJ`, `K_EJ`, `P_EJ`, `T_EJ`).
+   - **Tipo 2 — Vocal Rearticulada / Glotalizada Intervocálica (`V₁'V₁` o con tilde `V́₁'V₁` / `V₁'V́₁`):** Misma vocal a ambos lados del apóstrofo (ej. `ma'alob`, `ja'atskab`, `k'a'ana'an`, `ts'o'ok`) -> unidad nuclear única `/a̰ʔa/`, `/ḛʔe/`, `/ḭʔi/`, `/o̰ʔo/`, `/ṵʔu/` (Tokens: `A_REART`, `E_REART`, `I_REART`, `O_REART`, `U_REART`). Representa laringalización (*creaky voice*) u oclusión glotal breve intranuclear sin romper la palabra en dos pausas.
+   - **Tipo 3 — Cierre Glotal Posvocálico / Final (`V'` ante consonante, espacio o fin de palabra):** Ej. `ma'`, `ja'`, `sa'`, `na'` -> `/aʔ/`, `/eʔ/`, `/iʔ/`, `/oʔ/`, `/uʔ/` (Tokens: `A_GLOT`, `E_GLOT`, `I_GLOT`, `O_GLOT`, `U_GLOT`).
+   - **Tipo 4 — Ataque Glotal Prevocálico o Frontera Morfológica (`'V` al inicio o `C'V` donde `C` no es eyectivable, ej. `in 'otoch` / `y'éetel`):** Se representa con el ataque glotal explícito `/ʔ/`.
+4. **Distinción de los 5 Núcleos Vocálicos Mayas:**
+   - Vocal corta (`a, e, i, o, u`) -> `/a, e, i, o, u/`
+   - Vocal larga tono bajo (`aa, ee, ii, oo, uu`) -> `/àː, èː, ìː, òː, ùː/`
+   - Vocal larga tono alto (`áa, ée, íi, óo, úu`) -> `/áː, éː, íː, óː, úː/`
+   - Vocal rearticulada (`a'a, e'e, i'i, o'o, u'u`) -> `/a̰ʔa, ḛʔe, ḭʔi, o̰ʔo, ṵʔu/`
+   - Vocal glotalizada corta (`a', e', i', o', u'`) -> `/aʔ, eʔ, iʔ, oʔ, uʔ/`
+
+---
+
+### PLAN DE IMPLEMENTACIÓN EN 3 FASES SECUENCIALES (SIN CÓDIGO INCOMPLETO)
+
+#### FASE 1: Motor Lingüístico Maya 1984 (G2P + Analizador Morfosintáctico y Semántico)
+Crea el paquete `app/linguistics/` con tres archivos completos:
+1. `app/linguistics/__init__.py`
+2. `app/linguistics/maya_g2p_1984.py`:
+   - Clase `MayaG2P1984`:
+     - `normalize_orthography_1984(text: str) -> str`: Normaliza apóstrofos tipográficos (`’`, `ʼ`, `´`) a `'`, convierte `tz'`/`dz` -> `ts'`, `tz` -> `ts`, preserva préstamos hispanos si los hubiera y limpia puntuación.
+     - `phonemize_word(word: str)` y `phonemize_sentence(text: str) -> MayaG2PResult`:
+       - Desambigua primero los núcleos vocálicos complejos (`V₁'V₁`, `V́V`, `VV`, `V'`) y las consonantes eyectivas (`ch'`, `ts'`, `k'`, `p'`, `t'`) mediante un parser de máxima coincidencia izquierda-derecha.
+       - Devuelve en `MayaG2PResult`:
+         1. `normalized_1984`: Texto normalizado en ortografía de 1984.
+         2. `ipa_transcription`: Cadena AFI exacta (ej. `"Ma'alob k'iin"` -> `"[ma̰ʔaloɓ kʼìːn]"`).
+         3. `tts_phonetic_tokens`: Secuencia de tokens fonéticos legibles por entrenadores TTS (`XTTS-v2` / `VITS` / `Piper`) donde cada fonema maya tiene una representación única no ambigua (ej. `"m a_reart l o b_imp | k_ej ii_low n"`).
+         4. `Spanish_Approx_Readout`: Transcripción aproximada de control para motores TTS hispanos con marcadores prosódicos.
+         5. `expected_acoustic_profile`: Diccionario con conteo exacto de `expected_glottal_events` (suma de `V'V`, `V'` y eyectivas fuertes), `high_tone_syllables` (`V́V`), `long_vowel_syllables` (`VV`), `ejective_consonants` (`C'`) y detalle token por token.
+3. `app/linguistics/maya_grammar.py`:
+   - Clase `MayaGrammaticalAnalyzer`:
+     - Diccionario morfológico extensible de raíces, morfemas gramaticales y construcciones del maya yucateco:
+       - Marcadores de Aspecto-Modo (AM): `k-` (incompletivo), `t-` (completivo), `ts'o'ok` (terminativo), `yan` (obligativo), `taak` (desiderativo), `je'el ...-e'` (aseverativo).
+       - Pronombres Ergativos (Juego A): `in` / `inw` / `w` (1SG), `a` / `aw` (2SG), `u` / `uy` / `y` (3SG), `k` (1PL), `a ...-e'ex` (2PL), `u ...-o'ob` (3PL).
+       - Sufijos Absolutivos (Juego B): `-en` (1SG), `-ech` (2SG), `-∅` (3SG), `-o'on` (1PL), `-e'ex` (2PL), `-o'ob` (3PL).
+       - Raíces y expresiones frecuentes incluyendo las variantes de saludos y cortesía:
+         * `Ma'alob k'iin` (`ma'alob` [ADJ: bueno/bien, negación de *lob* 'malo'] + `k'iin` [N: sol/día/tiempo] -> Saludo estándar: *"Buen día / Buenos días"*).
+         * `Yutsil ja'atskab` o `Yutsil ja'atskab k'iin` (`yutsil` [ADJ/REL: bondad/bueno, de *uts* 'bueno' + *-il* relacional] + `ja'atskab` [ADV/N: mañana/temprano] -> Saludo tradicional: *"Buena mañana / Buenos días"*).
+         * `Ma'alob u sáastal k'iin` (`ma'alob` [ADJ: bueno] + `u` [3SG.ERG Juego A] + `sáastal` [V.INC: amanecer/clarear, de *sáas* 'luz/claro' + *-tal* incoativo] + `k'iin` [N: día/sol] -> Construcción descriptiva: *"Que amanezca bien el día / Buen amanecer"*).
+         * `Ma'alob áak'ab` (*Buenas noches*), `Ma'alob chi'inil k'iin` (*Buenas tardes*), `Bix a beel` (*¿Cómo estás?*, lit. *¿Cómo está tu camino?*), `Toj in wóol` (*Estoy bien*, lit. *Está recta/sana mi alma-ánimo*), `Nib óolal` / `Dios bo'otik` (*Gracias*), `Tu'ux ka bin` (*¿A dónde vas?*), `Ba'ax ka wa'alik` (*¿Qué dices / qué cuentas?*), etc.
+     - Método `analyze(text: str) -> dict` que detecta automáticamente si el texto es Maya Yucateco (`yua`), Español Yucateco (`es_yuc`) o Bilingüe/Code-Switching (`yua_es`), desglosa morfema por morfema (glosa interlineal estilo Leipzig: `raíz + categoría + significado`), traduce el sentido semántico al español y explica las diferencias pragmáticas entre variantes equivalentes.
+
+#### FASE 2: Integración en Base de Datos, Analizador Acústico Praat y Pipeline ASR/Maya
+1. `app/models.py` y migración automática segura en `app/database.py`:
+   - Añade en `AudioSegment` (con migración `ALTER TABLE` automática en `init_db()` si las columnas no existen en `accentlab.db` para no perder datos previos):
+     - `language_code`: `String(16)` (`"yua"` para Maya Yucateco 1984, `"es_yuc"` para Español Yucateco, `"yua_es"` para mixto).
+     - `ipa_phonemes`: `Text` (salida AFI del G2P).
+     - `tts_phonetic_tokens`: `Text` (secuencia fonética desambiguada para entrenar el TTS).
+     - `grammatical_analysis`: `JSON` (glosa morfológica, traducción semántica y notas pragmáticas).
+   - Añade en `AcousticMetrics`:
+     - `phonetic_alignment_score`: `Float` (0.0 a 100.0) que evalúa qué tan bien coincide la grabación acústica en Praat (saltillos detectados `[ʔ]`, HNR en vocales rearticuladas y picos de semitonos en tonos altos `V́V`) con lo esperado por el G2P maya.
+2. `app/analyzers/prosody.py`:
+   - Añade el método `evaluate_maya_phonetic_compliance(prosody_res, g2p_result) -> float` para comparar los `glottal_stops_count` y curvas tonales contra `expected_acoustic_profile`.
+3. `app/pipeline/processor.py`:
+   - Añade soporte para `language_mode` (`"auto"`, `"yua"`, `"es_yuc"`).
+   - Si el usuario graba una frase del catálogo maya (`prompt_text` en maya) o selecciona modo Maya (`yua`), evita que `faster-whisper` destruya el texto: usa un `initial_prompt` ortográfico maya 1984 (`"Ma'alob k'iin, Yutsil ja'atskab, Ma'alob u sáastal k'iin, Bix a beel, Toj in wóol, Dios bo'otik, Nib óolal, Ba'ax ka wa'alik, Tu'ux ka bin, k'a'ana'an, ja'atskab, áak'ab..."`), y si es modo `trap_phrase` con oración maya conocida, preserva la ortografía 1984 de referencia mientras usa la confianza acústica y fonación de Praat/Whisper para validar el clip, ejecutando automáticamente `MayaG2P1984` y `MayaGrammaticalAnalyzer`.
+
+#### FASE 3: Endpoints FastAPI, Catálogo Maya 1984 e Interfaz Gráfica Web (`main.py`, `index.html`, `app.js`)
+1. `app/main.py`:
+   - Amplía `TRAP_PHRASES` con al menos **12 oraciones en Maya Yucateco (Norma 1984)** categorizadas por fenómeno (`Saludos y Variantes Pragmáticas`, `Vocales Rearticuladas [V'V]`, `Consonantes Eyectivas [C']`, `Contraste Tonal [V́V vs VV]`), incluyendo explícitamente *Ma'alob k'iin*, *Yutsil ja'atskab* y *Ma'alob u sáastal k'iin*.
+   - Nuevo endpoint `POST /api/linguistics/analyze-maya`: recibe cualquier texto en maya (o español) y devuelve al instante la normalización 1984, transcripción AFI (IPA), tokens fonéticos TTS, desglose de apóstrofos (`C'` vs `V'V` vs `V'`), glosa morfosintáctica palabra por palabra y traducción semántica.
+   - Actualiza `POST /api/export-dataset` para permitir elegir el formato de texto en `metadata.csv`:
+     - `"orthographic_1984"` (`wavs/clip.wav|Ma'alob k'iin|SPK`)
+     - `"ipa_phonemes"` (`wavs/clip.wav|ma̰ʔaloɓ kʼìːn|SPK`)
+     - `"tts_tokens"` (`wavs/clip.wav|m a_reart l o b_imp | k_ej ii_low n|SPK`)
+     - `"dual_orth_ipa"` (incluye ambos en `metadata.csv` y `manifest.json`).
+2. `app/static/index.html`, `styles.css` y `app.js`:
+   - Añade selector de idioma de sesión (`Maya Yucateco [Norma 1984]`, `Español Yucateco`, `Detección Automática`).
+   - En el **Panel 03 (Analizador Visual)**, añade una nueva tarjeta interactiva **"Laboratorio Fonológico G2P Maya 1984 y Glosa Gramatical"** que muestre:
+     - Los **Fonemas AFI (IPA)** y **Tokens TTS** con código de colores (resaltando en distinto color las Eyectivas `C'`, Vocales Rearticuladas `V'V`, Cierres Glotales `V'` y Tonos Altos `V́V`).
+     - El **Desglose Morfosintáctico (Glosa Interlineal)** y significado gramatical de cada palabra maya.
+     - Un **Probador G2P en Vivo** donde el usuario pueda escribir cualquier frase en maya (como *"Ma'alob u sáastal k'iin"*) y ver su conversión fonológica y gramatical antes de grabarla.
+
+Comienza ahora mismo ejecutando y entregando el código completo de la **FASE 1 (`app/linguistics/__init__.py`, `app/linguistics/maya_g2p_1984.py` y `app/linguistics/maya_grammar.py`)** verificando su funcionamiento en consola.

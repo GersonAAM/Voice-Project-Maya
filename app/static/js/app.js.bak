@@ -1,0 +1,1896 @@
+/**
+ * AccentLab Web — Cliente SPA en JavaScript Vanilla (ES2022)
+ *
+ * Integra:
+ * 1. Gestión de hablantes y carrusel fonético de "Frases Trampa".
+ * 2. Grabación nativa con MediaRecorder + Osciloscopio/Espectro en vivo (Web Audio API Canvas).
+ * 3. Carga Drag & Drop para segmentación automática de audios largos con Silero VAD.
+ * 4. Analizador Visual en Chart.js: Curva de Entonación en Semitonos (30 puntos) y
+ *    Mapa Acústico de Vocales F1/F2 con ejes fonéticos invertidos y anclas /i, e, a, o, u/.
+ * 5. Explorador de segmentos SQLite con edición de modismos, eliminación física y
+ *    exportación directa a formato LJSpeech / Coqui / XTTS-v2 (.zip + metadata.csv).
+ */
+
+(() => {
+  "use strict";
+
+  // ==========================================================================
+  // Estado reactivo ligero de la aplicación
+  // ==========================================================================
+  const state = {
+    speakers: [],
+    allPrompts: [],
+    filteredPrompts: [],
+    currentPromptIdx: 0,
+    languageMode: "auto",
+    customOverridePrompt: "",
+    segments: [],
+    inspectedSegment: null,
+
+    // Grabación en navegador
+    mediaRecorder: null,
+    mediaStream: null,
+    audioCtx: null,
+    analyserNode: null,
+    animFrameId: null,
+    timerIntervalId: null,
+    recStartTimeMs: 0,
+    recordedChunks: [],
+    recordedBlob: null,
+    recordedPreviewUrl: null,
+    recordedMimeType: "",
+
+    // Carga de audio largo
+    selectedLongFile: null,
+
+    // Instancias de Chart.js
+    pitchChart: null,
+    vowelChart: null,
+  };
+
+  // Vocales cardinales de referencia (español mexicano medio aproximado en Hz)
+  const SPANISH_VOWEL_ANCHORS = [
+    { label: "/i/", x: 2320, y: 310 },
+    { label: "/e/", x: 1940, y: 475 },
+    { label: "/a/", x: 1340, y: 740 },
+    { label: "/o/", x: 960, y: 500 },
+    { label: "/u/", x: 810, y: 340 },
+  ];
+
+  // ==========================================================================
+  // Utilidades DOM, Formato y Notificaciones Toast
+  // ==========================================================================
+  const $ = (id) => document.getElementById(id);
+
+  function escapeHtml(str) {
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function showToast(message, variant = "info") {
+    const container = $("toastContainer");
+    if (!container) return;
+
+    const iconMap = {
+      success: "bi-check-circle-fill text-emerald",
+      danger: "bi-exclamation-octagon-fill text-danger",
+      warning: "bi-exclamation-triangle-fill text-warning",
+      info: "bi-info-circle-fill text-info",
+    };
+    const iconClass = iconMap[variant] || iconMap.info;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "toast align-items-center text-bg-dark border-secondary-subtle show";
+    wrapper.setAttribute("role", "alert");
+    wrapper.innerHTML = `
+      <div class="d-flex">
+        <div class="toast-body d-flex align-items-center gap-2 small">
+          <i class="bi ${iconClass} fs-6"></i>
+          <span>${escapeHtml(message)}</span>
+        </div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+      </div>
+    `;
+    container.appendChild(wrapper);
+
+    setTimeout(() => {
+      wrapper.classList.remove("show");
+      setTimeout(() => wrapper.remove(), 300);
+    }, 4500);
+  }
+
+  async function apiFetch(url, options = {}) {
+    const res = await fetch(url, options);
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    if (!res.ok) {
+      const detail = data?.detail || `Error HTTP ${res.status}`;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    return data;
+  }
+
+  function setProcessingBanner(visible, title = "", subtitle = "") {
+    const box = $("processingStatusBox");
+    if (!box) return;
+    if (visible) {
+      $("processingTitle").textContent = title || "Procesando audio en el motor DSP y ML...";
+      $("processingSubtitle").textContent =
+        subtitle || "Normalizando a WAV 24kHz · Extrayendo F0/Formantes/Saltillos · Faster-Whisper ASR";
+      box.classList.remove("d-none");
+    } else {
+      box.classList.add("d-none");
+    }
+  }
+
+  function pauseAllAudioElements(exceptEl = null) {
+    document.querySelectorAll("audio").forEach((audioEl) => {
+      if (audioEl !== exceptEl && !audioEl.paused) {
+        audioEl.pause();
+      }
+    });
+  }
+
+  function releaseAudioPlayers(targetUrl = null) {
+    document.querySelectorAll("audio").forEach((audioEl) => {
+      const currentSrc = audioEl.getAttribute("src") || "";
+      if (!targetUrl || (currentSrc && currentSrc.includes(targetUrl))) {
+        audioEl.pause();
+        audioEl.removeAttribute("src");
+        try {
+          audioEl.load();
+        } catch {
+          // Ignorar en navegadores sin soporte
+        }
+      }
+    });
+  }
+
+  // ==========================================================================
+  // 1. Carga de Estadísticas Globales y Desglose por Subregión
+  // ==========================================================================
+  async function loadStats() {
+    try {
+      const stats = await apiFetch("/api/stats");
+      $("kpiSpeakers").textContent = stats.total_speakers ?? 0;
+      $("kpiSegments").innerHTML = `${stats.total_segments ?? 0} <small class="text-secondary">(${stats.validated_segments ?? 0})</small>`;
+
+      const mins = Number(stats.total_duration_min || 0);
+      $("kpiDuration").textContent =
+        mins >= 60
+          ? `${Number(stats.total_duration_hours || 0).toFixed(2)} hrs`
+          : `${mins.toFixed(2)} min`;
+
+      $("kpiCantadito").textContent = `±${Number(stats.avg_semitones_std || 0).toFixed(2)} ST`;
+      $("kpiGlottals").textContent = `${stats.total_glottal_stops ?? 0}`;
+
+      renderSubregionChips(stats.by_subregion || []);
+    } catch (err) {
+      console.error("Error cargando estadísticas:", err);
+    }
+  }
+
+  function renderSubregionChips(subregions) {
+    const bar = $("subregionBreakdownBar");
+    if (!bar) return;
+    if (!subregions.length) {
+      bar.innerHTML = "";
+      return;
+    }
+
+    bar.innerHTML = subregions
+      .map(
+        (item) => `
+        <div class="subregion-chip d-flex align-items-center gap-2">
+          <strong class="text-info">${escapeHtml(item.subregion)}</strong>
+          <span class="text-secondary">|</span>
+          <span class="mono-font">${item.speakers} habl. · ${item.segments} clips (${Number(item.duration_min).toFixed(1)}m)</span>
+          <span class="badge bg-dark border border-secondary-subtle mono-font text-cyan">±${Number(item.avg_semitones_std).toFixed(2)} ST</span>
+          <span class="badge bg-dark border border-secondary-subtle mono-font text-amber">[ʔ] ${Number(item.avg_glottal_stops).toFixed(1)}/clip</span>
+        </div>
+      `
+      )
+      .join("");
+  }
+
+  // ==========================================================================
+  // 2. Gestión de Hablantes y Catálogo de Frases Trampa (Panel 1)
+  // ==========================================================================
+  async function loadSpeakers(selectSpeakerId = null) {
+    try {
+      const data = await apiFetch("/api/speakers");
+      state.speakers = data.speakers || [];
+
+      const activeSelect = $("activeSpeakerSelect");
+      const filterSelect = $("filterSpeakerSelect");
+      const previousActive = selectSpeakerId || activeSelect.value;
+      const previousFilter = filterSelect.value;
+
+      if (state.speakers.length === 0) {
+        activeSelect.innerHTML = `<option value="">-- Primero registra un hablante --</option>`;
+        $("activeSpeakerMeta").textContent = "Sin hablantes registrados aún.";
+        // Desplegar automáticamente el formulario en el primer uso
+        const collapseEl = $("newSpeakerCollapse");
+        if (collapseEl && !collapseEl.classList.contains("show")) {
+          new bootstrap.Collapse(collapseEl, { toggle: true });
+        }
+      } else {
+        activeSelect.innerHTML = state.speakers
+          .map(
+            (s) =>
+              `<option value="${s.id}">${escapeHtml(s.speaker_code)} — ${escapeHtml(s.name)} (${escapeHtml(s.subregion)} · ${s.segment_count} clips)</option>`
+          )
+          .join("");
+
+        if (previousActive && state.speakers.some((s) => String(s.id) === String(previousActive))) {
+          activeSelect.value = String(previousActive);
+        } else {
+          activeSelect.value = String(state.speakers[0].id);
+        }
+        updateActiveSpeakerMeta();
+      }
+
+      filterSelect.innerHTML =
+        `<option value="">Todos los hablantes</option>` +
+        state.speakers
+          .map(
+            (s) =>
+              `<option value="${s.id}">${escapeHtml(s.speaker_code)} — ${escapeHtml(s.name)}</option>`
+          )
+          .join("");
+      if (previousFilter && state.speakers.some((s) => String(s.id) === String(previousFilter))) {
+        filterSelect.value = String(previousFilter);
+      }
+    } catch (err) {
+      showToast(`No se pudieron cargar los hablantes: ${err.message}`, "danger");
+    }
+  }
+
+  function updateActiveSpeakerMeta() {
+    const selectedId = Number($("activeSpeakerSelect").value);
+    const spk = state.speakers.find((s) => s.id === selectedId);
+    const metaEl = $("activeSpeakerMeta");
+    if (!spk) {
+      metaEl.textContent = "";
+      return;
+    }
+    metaEl.textContent = `Código: ${spk.speaker_code} | Género: ${spk.gender} | Edad: ${spk.age} | Subregión: ${spk.subregion} | Acento: ${spk.accent_intensity} | Acumulado: ${spk.total_duration_sec}s`;
+  }
+
+  async function handleCreateSpeaker(evt) {
+    evt.preventDefault();
+    const payload = {
+      name: $("spkName").value.trim(),
+      gender: $("spkGender").value,
+      age: Number($("spkAge").value),
+      subregion: $("spkSubregion").value,
+      accent_intensity: $("spkIntensity").value,
+    };
+
+    if (!payload.name) {
+      showToast("Ingresa el nombre o alias del hablante.", "warning");
+      return;
+    }
+
+    try {
+      const res = await apiFetch("/api/speakers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const created = res.speaker;
+      $("speakerForm").reset();
+      $("spkAge").value = "32";
+      $("spkIntensity").value = "Medio";
+
+      const collapseEl = $("newSpeakerCollapse");
+      const bsCollapse = bootstrap.Collapse.getInstance(collapseEl);
+      if (bsCollapse) bsCollapse.hide();
+
+      await Promise.all([loadSpeakers(created.id), loadStats()]);
+      showToast(`Hablante ${created.speaker_code} (${created.name}) registrado.`, "success");
+    } catch (err) {
+      showToast(`Error al crear hablante: ${err.message}`, "danger");
+    }
+  }
+
+  async function handleDeleteSpeaker() {
+    const selectedId = Number($("activeSpeakerSelect").value);
+    const spk = state.speakers.find((s) => s.id === selectedId);
+    if (!spk) {
+      showToast("No hay ningún hablante seleccionado.", "warning");
+      return;
+    }
+    const ok = window.confirm(
+      `¿Seguro que deseas eliminar al hablante ${spk.speaker_code} (${spk.name}) y borrar sus ${spk.segment_count} archivos WAV del disco?`
+    );
+    if (!ok) return;
+
+    try {
+      releaseAudioPlayers("/media/wavs/");
+      await apiFetch(`/api/speakers/${spk.id}`, { method: "DELETE" });
+      if (state.inspectedSegment?.speaker_id === spk.id) {
+        resetAnalyzerPanel();
+      }
+      showToast(`Hablante ${spk.speaker_code} eliminado.`, "info");
+      await Promise.all([loadSpeakers(), loadStats(), loadSegments(true)]);
+    } catch (err) {
+      showToast(`No se pudo eliminar el hablante: ${err.message}`, "danger");
+    }
+  }
+
+  async function loadPrompts() {
+    try {
+      const data = await apiFetch("/api/prompts");
+      state.allPrompts = data.prompts || [];
+      rebuildFilteredPromptsByLanguage();
+    } catch (err) {
+      $("promptReadingText").textContent = "Error al cargar el catálogo fonético.";
+      console.error(err);
+    }
+  }
+
+  function rebuildFilteredPromptsByLanguage() {
+    const langMode = state.languageMode || "auto";
+    const pool =
+      langMode === "auto"
+        ? [...state.allPrompts]
+        : state.allPrompts.filter((p) => (p.language || "es_yuc") === langMode);
+
+    const catSelect = $("promptCategoryFilter");
+    const categories = Array.from(new Set(pool.map((p) => p.category)));
+    catSelect.innerHTML =
+      `<option value="">Todas las categorías (${pool.length})</option>` +
+      categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+
+    state.filteredPrompts = pool;
+    state.currentPromptIdx = 0;
+    state.customOverridePrompt = "";
+    renderCurrentPrompt();
+  }
+
+  function renderCurrentPrompt() {
+    const list = state.filteredPrompts;
+    if (!list.length) {
+      $("promptReadingText").textContent = "Sin frases en esta categoría.";
+      $("promptCounter").textContent = "0 / 0";
+      return;
+    }
+    if (state.currentPromptIdx >= list.length) state.currentPromptIdx = 0;
+    if (state.currentPromptIdx < 0) state.currentPromptIdx = list.length - 1;
+
+    const item = list[state.currentPromptIdx];
+    const isMaya = (item.language || "es_yuc") === "yua";
+    const langBadge = $("promptLangBadge");
+    if (langBadge) {
+      langBadge.textContent = isMaya ? "YUA · 1984" : "ES · YUC";
+      langBadge.className = isMaya
+        ? "badge bg-emerald-subtle mono-font me-1"
+        : "badge text-bg-secondary bg-opacity-25 text-light border border-secondary-subtle mono-font me-1";
+    }
+
+    $("promptCounter").textContent = `${state.currentPromptIdx + 1} / ${list.length}`;
+    $("promptCategoryBadge").textContent = item.category;
+    $("promptIdBadge").textContent = item.id;
+    $("promptReadingText").textContent = `«${item.text}»`;
+    $("promptPhenomenonText").textContent = item.phenomenon;
+
+    if (!state.inspectedSegment) {
+      const g2pInput = $("liveG2pInput");
+      if (g2pInput) {
+        g2pInput.value = item.text;
+        runLiveMayaAnalysis(item.text);
+      }
+    }
+  }
+
+  function getActivePromptMode() {
+    const checked = document.querySelector('input[name="promptModeRadio"]:checked');
+    return checked ? checked.value : "trap_phrase";
+  }
+
+  function getActivePromptText() {
+    if (getActivePromptMode() !== "trap_phrase") return "";
+    if (state.customOverridePrompt) return state.customOverridePrompt;
+    const item = state.filteredPrompts[state.currentPromptIdx];
+    return item ? item.text : "";
+  }
+
+  // ==========================================================================
+  // 3. Estudio de Grabación Web (MediaRecorder + Web Audio API Canvas) y VAD
+  // ==========================================================================
+  async function refreshMicDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter((d) => d.kind === "audioinput");
+      const sel = $("micDeviceSelect");
+      const prev = sel.value;
+      if (mics.length > 0) {
+        sel.innerHTML = mics
+          .map(
+            (m, i) =>
+              `<option value="${escapeHtml(m.deviceId)}">${escapeHtml(
+                m.label || `Micrófono ${i + 1}`
+              )}</option>`
+          )
+          .join("");
+        if (prev && mics.some((m) => m.deviceId === prev)) {
+          sel.value = prev;
+        }
+      }
+    } catch (err) {
+      console.debug("No se pudieron enumerar dispositivos aún:", err);
+    }
+  }
+
+  function pickSupportedMimeType() {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/mp4",
+    ];
+    if (typeof MediaRecorder === "undefined") return "";
+    for (const mime of candidates) {
+      if (MediaRecorder.isTypeSupported(mime)) return mime;
+    }
+    return "";
+  }
+
+  function drawIdleCanvas() {
+    const canvas = $("waveformCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.fillStyle = "#060911";
+    ctx.fillRect(0, 0, w, h);
+
+    // Rejilla técnica sutil
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.08)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < w; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+    for (let y = 0; y < h; y += 30) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+
+    // Línea central de equilibrio
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function startRealtimeVisualizer(stream) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    state.audioCtx = new AudioContextClass();
+    const source = state.audioCtx.createMediaStreamSource(stream);
+    state.analyserNode = state.audioCtx.createAnalyser();
+    state.analyserNode.fftSize = 2048;
+    state.analyserNode.smoothingTimeConstant = 0.78;
+    source.connect(state.analyserNode);
+
+    const canvas = $("waveformCanvas");
+    const ctx = canvas.getContext("2d");
+    const timeData = new Uint8Array(state.analyserNode.fftSize);
+    const freqData = new Uint8Array(state.analyserNode.frequencyBinCount);
+
+    const renderFrame = () => {
+      if (!state.analyserNode) return;
+      state.animFrameId = requestAnimationFrame(renderFrame);
+
+      const w = canvas.width;
+      const h = canvas.height;
+      state.analyserNode.getByteTimeDomainData(timeData);
+      state.analyserNode.getByteFrequencyData(freqData);
+
+      ctx.fillStyle = "#060911";
+      ctx.fillRect(0, 0, w, h);
+
+      // 1) Barras de espectro en segundo plano
+      const barCount = 64;
+      const barWidth = w / barCount;
+      for (let i = 0; i < barCount; i++) {
+        const mag = freqData[i * 3] / 255.0;
+        const barH = mag * (h * 0.72);
+        ctx.fillStyle = `rgba(16, 185, 129, ${0.12 + mag * 0.32})`;
+        ctx.fillRect(i * barWidth, h - barH, barWidth - 2, barH);
+      }
+
+      // 2) Forma de onda en el dominio temporal + cálculo RMS en dBFS
+      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = "#38bdf8";
+      ctx.beginPath();
+
+      let sumSq = 0.0;
+      const sliceWidth = w / timeData.length;
+      let x = 0;
+
+      for (let i = 0; i < timeData.length; i++) {
+        const norm = (timeData[i] - 128) / 128.0;
+        sumSq += norm * norm;
+        const y = h / 2 + norm * (h * 0.44);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.stroke();
+
+      const rms = Math.sqrt(sumSq / timeData.length);
+      const dbFs = rms > 1e-5 ? 20.0 * Math.log10(rms) : -60.0;
+      $("rmsMeterText").textContent = `Nivel: ${dbFs.toFixed(1)} dBFS`;
+    };
+
+    renderFrame();
+  }
+
+  function stopVisualizerAndStream() {
+    if (state.animFrameId) {
+      cancelAnimationFrame(state.animFrameId);
+      state.animFrameId = null;
+    }
+    if (state.timerIntervalId) {
+      clearInterval(state.timerIntervalId);
+      state.timerIntervalId = null;
+    }
+    state.analyserNode = null;
+    if (state.audioCtx) {
+      state.audioCtx.close().catch(() => {});
+      state.audioCtx = null;
+    }
+    if (state.mediaStream) {
+      state.mediaStream.getTracks().forEach((t) => t.stop());
+      state.mediaStream = null;
+    }
+  }
+
+  async function startRecording() {
+    const btnStart = $("btnStartRec");
+    if (btnStart.disabled) return;
+
+    const speakerId = Number($("activeSpeakerSelect").value);
+    if (!speakerId) {
+      showToast("Primero registra o selecciona un hablante en el Panel 01.", "warning");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast("Tu navegador no soporta captura de micrófono (MediaDevices API).", "danger");
+      return;
+    }
+
+    btnStart.disabled = true;
+    pauseAllAudioElements();
+    discardRecordedPreview();
+
+    const rawDsp = $("rawDspSwitch").checked;
+    const deviceId = $("micDeviceSelect").value;
+    const audioConstraints = {
+      echoCancellation: !rawDsp,
+      noiseSuppression: !rawDsp,
+      autoGainControl: !rawDsp,
+      channelCount: 1,
+    };
+    if (deviceId) {
+      audioConstraints.deviceId = { exact: deviceId };
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      state.mediaStream = stream;
+      await refreshMicDevices();
+
+      const mimeType = pickSupportedMimeType();
+      state.recordedMimeType = mimeType || "audio/webm";
+      state.recordedChunks = [];
+
+      state.mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      state.mediaRecorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          state.recordedChunks.push(ev.data);
+        }
+      };
+
+      state.mediaRecorder.onstop = () => {
+        stopVisualizerAndStream();
+        drawIdleCanvas();
+
+        const blob = new Blob(state.recordedChunks, {
+          type: state.recordedMimeType || "audio/webm",
+        });
+        if (blob.size < 512) {
+          showToast("La grabación está vacía o fue demasiado breve.", "warning");
+          return;
+        }
+        state.recordedBlob = blob;
+        state.recordedPreviewUrl = URL.createObjectURL(blob);
+
+        const player = $("previewAudioPlayer");
+        player.src = state.recordedPreviewUrl;
+        $("previewMimeInfo").textContent = `${(blob.size / 1024).toFixed(1)} KB · ${state.recordedMimeType}`;
+        $("previewBox").classList.remove("d-none");
+      };
+
+      state.mediaRecorder.start(150);
+      startRealtimeVisualizer(stream);
+
+      // UI estado grabando
+      state.recStartTimeMs = performance.now();
+      btnStart.disabled = false;
+      btnStart.classList.add("d-none");
+      $("btnStopRec").classList.remove("d-none");
+      $("recDot").classList.add("rec-dot-active");
+      $("recStateBadge").innerHTML = `<i class="bi bi-circle-fill rec-dot-active me-1" id="recDot"></i>GRABANDO`;
+
+      state.timerIntervalId = setInterval(() => {
+        const elapsedSec = (performance.now() - state.recStartTimeMs) / 1000.0;
+        const mins = String(Math.floor(elapsedSec / 60)).padStart(2, "0");
+        const secs = (elapsedSec % 60).toFixed(1).padStart(4, "0");
+        const timerEl = $("recTimer");
+        timerEl.textContent = `${mins}:${secs}`;
+        timerEl.className =
+          elapsedSec >= 3.0 && elapsedSec <= 10.0
+            ? "mono-font fw-bold fs-5 text-emerald"
+            : "mono-font fw-bold fs-5 text-white";
+      }, 100);
+    } catch (err) {
+      btnStart.disabled = false;
+      stopVisualizerAndStream();
+      showToast(`No se pudo acceder al micrófono: ${err.message}`, "danger");
+    }
+  }
+
+  function stopRecording() {
+    if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
+      state.mediaRecorder.stop();
+    }
+    $("btnStopRec").classList.add("d-none");
+    $("btnStartRec").classList.remove("d-none");
+    $("recStateBadge").innerHTML = `<i class="bi bi-circle-fill text-emerald me-1" id="recDot"></i>CAPTURADO`;
+  }
+
+  function discardRecordedPreview() {
+    if (state.recordedPreviewUrl) {
+      URL.revokeObjectURL(state.recordedPreviewUrl);
+      state.recordedPreviewUrl = null;
+    }
+    state.recordedBlob = null;
+    state.recordedChunks = [];
+    $("previewAudioPlayer").removeAttribute("src");
+    $("previewBox").classList.add("d-none");
+    $("recTimer").textContent = "00:00.0";
+    $("recTimer").className = "mono-font fw-bold fs-5 text-white";
+    $("rmsMeterText").textContent = "Nivel: -- dBFS";
+    $("recStateBadge").innerHTML = `<i class="bi bi-circle-fill text-secondary me-1" id="recDot"></i>LISTO`;
+  }
+
+  async function uploadRecordedClip() {
+    const speakerId = Number($("activeSpeakerSelect").value);
+    if (!speakerId) {
+      showToast("Selecciona un hablante activo antes de enviar.", "warning");
+      return;
+    }
+    if (!state.recordedBlob) {
+      showToast("No hay ningún clip grabado pendiente de envío.", "warning");
+      return;
+    }
+
+    const ext = state.recordedMimeType.includes("ogg")
+      ? ".ogg"
+      : state.recordedMimeType.includes("mp4")
+      ? ".m4a"
+      : ".webm";
+
+    const formData = new FormData();
+    formData.append("speaker_id", String(speakerId));
+    formData.append("prompt_mode", getActivePromptMode());
+    formData.append("language_mode", state.languageMode || "auto");
+    const promptTxt = getActivePromptText();
+    if (promptTxt) {
+      formData.append("prompt_text", promptTxt);
+    }
+    formData.append("audio", state.recordedBlob, `browser_clip${ext}`);
+
+    const btn = $("btnUploadRecordedClip");
+    btn.disabled = true;
+    setProcessingBanner(
+      true,
+      "Analizando prosodia, saltillos y transcribiendo clip...",
+      "Conversión a WAV 24kHz PCM · Praat F0/Formantes · Faster-Whisper ASR"
+    );
+
+    try {
+      const res = await apiFetch("/api/record-clip", {
+        method: "POST",
+        body: formData,
+      });
+      discardRecordedPreview();
+      const seg = res.segment;
+      renderAnalyzedSegment(seg);
+      await Promise.all([loadStats(), loadSpeakers(speakerId), loadSegments()]);
+      showToast(`Clip ${seg.filename} analizado con éxito.`, "success");
+    } catch (err) {
+      showToast(`Error al procesar clip: ${err.message}`, "danger");
+    } finally {
+      btn.disabled = false;
+      setProcessingBanner(false);
+    }
+  }
+
+  // --- Carga Drag & Drop de Audios Largos (Silero VAD) ---
+  function handleLongFileSelection(file) {
+    if (!file) return;
+    state.selectedLongFile = file;
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+    $("selectedLongFileName").textContent = `${file.name} (${sizeMb} MB)`;
+    $("btnProcessLongAudio").disabled = false;
+  }
+
+  async function processLongAudioUpload() {
+    const speakerId = Number($("activeSpeakerSelect").value);
+    if (!speakerId) {
+      showToast("Primero selecciona el hablante al que pertenece el audio largo.", "warning");
+      return;
+    }
+    if (!state.selectedLongFile) {
+      showToast("Selecciona o arrastra un archivo de audio primero.", "warning");
+      return;
+    }
+
+    const minSec = Number($("vadMinSec").value) || 3.0;
+    const maxSec = Number($("vadMaxSec").value) || 10.0;
+    const padMs = Number($("vadPadMs").value) || 180;
+
+    if (minSec >= maxSec) {
+      showToast("La duración mínima debe ser estrictamente menor que la duración máxima.", "warning");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("speaker_id", String(speakerId));
+    formData.append("min_duration_sec", String(minSec));
+    formData.append("max_duration_sec", String(maxSec));
+    formData.append("pad_ms", String(padMs));
+    formData.append("language_mode", state.languageMode || "auto");
+    formData.append("audio", state.selectedLongFile);
+
+    const btn = $("btnProcessLongAudio");
+    btn.disabled = true;
+    setProcessingBanner(
+      true,
+      `Segmentando "${state.selectedLongFile.name}" con Silero VAD...`,
+      `Recortando fragmentos de ${minSec}s a ${maxSec}s sin cortar palabras y transcribiendo lote`
+    );
+
+    try {
+      const res = await apiFetch("/api/upload-long-audio", {
+        method: "POST",
+        body: formData,
+      });
+
+      state.selectedLongFile = null;
+      $("longAudioInput").value = "";
+      $("selectedLongFileName").textContent = "Ningún archivo seleccionado";
+
+      if (res.segments && res.segments.length > 0) {
+        renderAnalyzedSegment(res.segments[0]);
+        showToast(res.message || `Se crearon ${res.count} segmentos.`, "success");
+      } else {
+        showToast(res.message || "No se hallaron segmentos en el rango indicado.", "warning");
+      }
+
+      await Promise.all([loadStats(), loadSpeakers(speakerId), loadSegments()]);
+    } catch (err) {
+      btn.disabled = false;
+      showToast(`Error en segmentación VAD: ${err.message}`, "danger");
+    } finally {
+      setProcessingBanner(false);
+    }
+  }
+
+  // ==========================================================================
+  // 4. Analizador Visual de Acento en Tiempo Real (Chart.js — Panel 3)
+  // ==========================================================================
+  const vowelLabelsPlugin = {
+    id: "vowelAnchorLabels",
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      const meta = chart.getDatasetMeta(0);
+      if (!meta || !meta.data) return;
+
+      ctx.save();
+      ctx.font = "600 12px 'JetBrains Mono', monospace";
+      ctx.fillStyle = "rgba(148, 163, 184, 0.85)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+
+      meta.data.forEach((pointEl, idx) => {
+        const anchor = SPANISH_VOWEL_ANCHORS[idx];
+        if (anchor) {
+          ctx.fillText(anchor.label, pointEl.x, pointEl.y - 6);
+        }
+      });
+      ctx.restore();
+    },
+  };
+
+  function initCharts() {
+    // 1) Gráfica Lineal de Entonación Normalizada (30 puntos en Semitonos)
+    const pitchCanvas = $("pitchCurveChart");
+    const pCtx = pitchCanvas.getContext("2d");
+    const gradient = pCtx.createLinearGradient(0, 0, 0, 230);
+    gradient.addColorStop(0, "rgba(56, 189, 248, 0.36)");
+    gradient.addColorStop(1, "rgba(56, 189, 248, 0.01)");
+
+    const labels30 = Array.from({ length: 30 }, (_, i) => `${Math.round(((i + 1) / 30) * 100)}%`);
+
+    state.pitchChart = new Chart(pCtx, {
+      type: "line",
+      data: {
+        labels: labels30,
+        datasets: [
+          {
+            label: "Contorno F0 (Semitonos)",
+            data: new Array(30).fill(0),
+            borderColor: "#38bdf8",
+            backgroundColor: gradient,
+            borderWidth: 2.5,
+            pointRadius: 2.8,
+            pointHoverRadius: 5,
+            pointBackgroundColor: "#38bdf8",
+            fill: true,
+            tension: 0.35,
+          },
+          {
+            label: "Mediana del hablante (0 ST)",
+            data: new Array(30).fill(0),
+            borderColor: "rgba(148, 163, 184, 0.38)",
+            borderWidth: 1.2,
+            borderDash: [5, 5],
+            pointRadius: 0,
+            fill: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            labels: { color: "#94a3b8", boxWidth: 12, font: { size: 11 } },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                if (ctx.datasetIndex === 1) return null;
+                const val = Number(ctx.parsed.y || 0);
+                const sign = val >= 0 ? "+" : "";
+                return ` Entonación: ${sign}${val.toFixed(2)} ST`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: "#64748b", maxTicksLimit: 10, font: { size: 10 } },
+            grid: { color: "rgba(148, 163, 184, 0.06)" },
+            title: {
+              display: true,
+              text: "Tiempo Normalizado de Fonación (30 puntos)",
+              color: "#64748b",
+              font: { size: 10 },
+            },
+          },
+          y: {
+            suggestedMin: -6,
+            suggestedMax: 6,
+            ticks: {
+              color: "#94a3b8",
+              font: { size: 10 },
+              callback: (v) => `${v > 0 ? "+" : ""}${v} ST`,
+            },
+            grid: { color: "rgba(148, 163, 184, 0.08)" },
+          },
+        },
+      },
+    });
+
+    // 2) Mapa Acústico de Vocales (Carta Formántica F1/F2 Invertida)
+    const vCtx = $("vowelSpaceChart").getContext("2d");
+    state.vowelChart = new Chart(vCtx, {
+      type: "scatter",
+      plugins: [vowelLabelsPlugin],
+      data: {
+        datasets: [
+          {
+            label: "Vocales ref.",
+            data: SPANISH_VOWEL_ANCHORS,
+            backgroundColor: "rgba(148, 163, 184, 0.35)",
+            borderColor: "rgba(148, 163, 184, 0.7)",
+            pointRadius: 5,
+            pointStyle: "rectRot",
+          },
+          {
+            label: "Núcleos del clip",
+            data: [],
+            backgroundColor: "rgba(167, 139, 250, 0.65)",
+            borderColor: "#a78bfa",
+            pointRadius: 4,
+          },
+          {
+            label: "Centroide F1/F2",
+            data: [],
+            backgroundColor: "#f59e0b",
+            borderColor: "#ffffff",
+            borderWidth: 1.5,
+            pointRadius: 7,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: { color: "#94a3b8", boxWidth: 10, font: { size: 10 } },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const raw = ctx.raw || {};
+                const prefix = raw.label ? `Vocal ${raw.label}` : ctx.dataset.label;
+                return ` ${prefix}: F1=${Math.round(raw.y)} Hz, F2=${Math.round(raw.x)} Hz`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            reverse: true,
+            min: 600,
+            max: 3250,
+            title: {
+              display: true,
+              text: "F2 — Anterioridad ↔ Posterioridad (Hz)",
+              color: "#64748b",
+              font: { size: 10 },
+            },
+            ticks: { color: "#64748b", font: { size: 10 }, maxTicksLimit: 6 },
+            grid: { color: "rgba(148, 163, 184, 0.07)" },
+          },
+          y: {
+            reverse: true,
+            min: 180,
+            max: 1120,
+            title: {
+              display: true,
+              text: "F1 — Abertura (Hz)",
+              color: "#64748b",
+              font: { size: 10 },
+            },
+            ticks: { color: "#94a3b8", font: { size: 10 }, maxTicksLimit: 6 },
+            grid: { color: "rgba(148, 163, 184, 0.07)" },
+          },
+        },
+      },
+    });
+  }
+
+  function getPhonemeBadgeClass(category) {
+    switch (category) {
+      case "ejective_consonant":
+        return "phon-ejective";
+      case "rearticulated_vowel":
+        return "phon-reart";
+      case "glottalized_vowel":
+      case "glottal_stop":
+        return "phon-glottal";
+      case "high_tone_long_vowel":
+      case "high_tone_short_vowel":
+        return "phon-hightone";
+      case "low_tone_long_vowel":
+        return "phon-lowlong";
+      case "implosive_consonant":
+        return "phon-implosive";
+      default:
+        return "phon-plain";
+    }
+  }
+
+  function formatLangPill(langCode) {
+    if (langCode === "yua") {
+      return `<span class="badge bg-emerald-subtle mono-font">YUA · 1984</span>`;
+    }
+    if (langCode === "yua_es") {
+      return `<span class="badge bg-purple-subtle mono-font">YUA + ES</span>`;
+    }
+    return `<span class="badge bg-dark border border-secondary-subtle text-secondary mono-font">ES · YUC</span>`;
+  }
+
+  function renderMayaLinguisticsLab(analysis) {
+    if (!analysis) return;
+
+    const g2p = analysis.g2p || analysis;
+    const wordsG2p = analysis.words_g2p || g2p.words || [];
+    const profile =
+      analysis.expected_acoustic_profile || g2p.expected_acoustic_profile || {};
+    const apBreak =
+      analysis.apostrophe_breakdown || profile.apostrophe_breakdown || {};
+
+    const langCode = analysis.language_code || "yua";
+    const langLabel =
+      analysis.language_label ||
+      (langCode === "yua"
+        ? "Maya Yucateco (Norma 1984)"
+        : langCode === "yua_es"
+        ? "Bilingüe Maya–Español"
+        : "Español Yucateco");
+
+    const langBadge = $("g2pDetectedLangBadge");
+    if (langBadge) {
+      langBadge.textContent = langLabel;
+      langBadge.className =
+        langCode === "yua"
+          ? "badge bg-emerald-subtle mono-font"
+          : langCode === "yua_es"
+          ? "badge bg-purple-subtle mono-font"
+          : "badge bg-dark border border-secondary-subtle text-info mono-font";
+    }
+
+    $("g2pNormalizedText").textContent =
+      analysis.normalized_1984 || g2p.normalized_1984 || "--";
+    $("g2pRawIpaString").textContent =
+      analysis.ipa_transcription || g2p.ipa_transcription || "[]";
+
+    // 1) Renderizado coloreado palabra por palabra de Fonemas AFI (IPA) y Tokens TTS
+    const ipaContainer = $("g2pIpaColoredContainer");
+    const ttsContainer = $("g2pTtsColoredContainer");
+
+    if (wordsG2p.length > 0) {
+      ipaContainer.innerHTML = wordsG2p
+        .map((w) => {
+          const toks = (w.tokens || [])
+            .filter((t) => t.ipa)
+            .map((t) => {
+              const cls = getPhonemeBadgeClass(t.category);
+              const tip = `${t.word}: '${t.grapheme}' → /${t.ipa}/ (${t.category}${
+                t.apostrophe_type ? " · " + t.apostrophe_type : ""
+              })`;
+              return `<span class="phon-badge ${cls}" title="${escapeHtml(tip)}">${escapeHtml(
+                t.ipa
+              )}</span>`;
+            })
+            .join("");
+          return `<span class="phon-word-group" title="${escapeHtml(
+            w.normalized_word
+          )}">${toks}</span>`;
+        })
+        .join("");
+
+      ttsContainer.innerHTML = wordsG2p
+        .map((w) => {
+          const toks = (w.tokens || [])
+            .filter((t) => t.tts_token)
+            .map((t) => {
+              const cls = getPhonemeBadgeClass(t.category);
+              const tip = `${t.grapheme} → ${t.tts_token}`;
+              return `<span class="phon-badge ${cls}" title="${escapeHtml(tip)}">${escapeHtml(
+                t.tts_token
+              )}</span>`;
+            })
+            .join("");
+          return `<span class="phon-word-group">${toks}</span>`;
+        })
+        .join(`<span class="phon-sep">|</span>`);
+    } else {
+      ipaContainer.innerHTML = `<span class="text-secondary xsmall">Sin tokens fonológicos</span>`;
+      ttsContainer.innerHTML = `<span class="text-secondary xsmall">Sin tokens TTS</span>`;
+    }
+
+    // 2) Desglose explícito de apóstrofos (C' vs V'V vs V' vs 'V) y tonos altos
+    const t1 = apBreak.TYPE_1_EJECTIVE?.count ?? 0;
+    const t2 = apBreak.TYPE_2_REARTICULATED?.count ?? 0;
+    const t3 = apBreak.TYPE_3_CODA_GLOTTAL?.count ?? 0;
+    const t4 = apBreak.TYPE_4_BOUNDARY_GLOTTAL?.count ?? 0;
+    const highTones = profile.high_tone_syllables ?? 0;
+    const lowLong = profile.low_tone_long_vowels ?? 0;
+
+    $("g2pApostropheSummary").innerHTML = `
+      <span class="badge bg-dark border border-secondary-subtle text-light">Tipo 1 Eyectivas C': <strong class="text-danger">${t1}</strong></span>
+      <span class="badge bg-dark border border-secondary-subtle text-light">Tipo 2 Rearticuladas V'V: <strong class="text-emerald">${t2}</strong></span>
+      <span class="badge bg-dark border border-secondary-subtle text-light">Tipo 3 Cierre Final V': <strong class="text-amber">${t3}</strong></span>
+      <span class="badge bg-dark border border-secondary-subtle text-light">Tipo 4 Frontera 'V: <strong class="text-amber">${t4}</strong></span>
+      <span class="badge bg-dark border border-secondary-subtle text-light">Tonos Altos V́V: <strong class="text-purple">${highTones}</strong></span>
+      <span class="badge bg-dark border border-secondary-subtle text-light">Largas Bajas VV: <strong class="text-cyan">${lowLong}</strong></span>
+    `;
+
+    // 3) Glosa Interlineal Morfosintáctica (Estilo Leipzig) y Traducción Semántica
+    $("gramSemanticTranslation").textContent =
+      analysis.semantic_translation_es || "--";
+    $("gramLiteralGloss").textContent = analysis.literal_gloss_es || "--";
+    $("gramSyntacticStructure").textContent =
+      analysis.syntactic_structure || "Análisis Morfosintáctico";
+
+    const morphemes = Array.isArray(analysis.morphemes) ? analysis.morphemes : [];
+    const cardsEl = $("gramMorphemeCards");
+    if (morphemes.length > 0) {
+      cardsEl.innerHTML = morphemes
+        .map(
+          (m) => `
+          <div class="morpheme-card">
+            <div class="d-flex justify-content-between align-items-baseline gap-2">
+              <span class="morpheme-surface mono-font">${escapeHtml(m.normalized_word)}</span>
+              <span class="badge bg-dark border border-secondary-subtle xsmall text-secondary">${escapeHtml(
+                m.lexical_category
+              )}</span>
+            </div>
+            <div class="morpheme-seg mono-font">${escapeHtml(m.morpheme_segmentation)}</div>
+            <div class="morpheme-gloss mono-font">${escapeHtml(m.leipzig_gloss)}</div>
+            <div class="morpheme-meaning mt-1">${escapeHtml(m.meaning_es)}</div>
+          </div>
+        `
+        )
+        .join("");
+    } else {
+      cardsEl.innerHTML = "";
+    }
+
+    const frames = Array.isArray(analysis.discontinuous_frames)
+      ? analysis.discontinuous_frames
+      : [];
+    const notesText = analysis.pragmatic_notes || "";
+    const framesHtml = frames.length
+      ? `<div class="text-info mt-1"><i class="bi bi-brackets me-1"></i>${frames
+          .map((f) => escapeHtml(f))
+          .join(" · ")}</div>`
+      : "";
+    $("gramPragmaticNotes").innerHTML =
+      (notesText
+        ? `<i class="bi bi-journal-bookmark text-emerald me-1"></i><strong>Nota pragmática:</strong> ${escapeHtml(
+            notesText
+          )}`
+        : "") + framesHtml;
+
+    const variants = Array.isArray(analysis.equivalent_variants)
+      ? analysis.equivalent_variants
+      : [];
+    const varEl = $("gramEquivalentVariants");
+    if (variants.length > 0) {
+      varEl.innerHTML =
+        `<span class="text-light fw-semibold me-1">Variantes pragmáticas equivalentes:</span>` +
+        variants
+          .map(
+            (v) =>
+              `<span class="badge bg-dark border border-secondary-subtle text-emerald mono-font me-1">${escapeHtml(
+                v
+              )}</span>`
+          )
+          .join("");
+    } else {
+      varEl.innerHTML = "";
+    }
+  }
+
+  let liveG2pAbortCtrl = null;
+  async function runLiveMayaAnalysis(textToAnalyze = null) {
+    const raw = (textToAnalyze ?? $("liveG2pInput")?.value ?? "").trim();
+    if (!raw) return;
+
+    if (liveG2pAbortCtrl) {
+      liveG2pAbortCtrl.abort();
+    }
+    liveG2pAbortCtrl = new AbortController();
+
+    try {
+      const res = await apiFetch("/api/linguistics/analyze-maya", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: raw }),
+        signal: liveG2pAbortCtrl.signal,
+      });
+      renderMayaLinguisticsLab(res);
+      return res;
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        console.error("Error en análisis G2P Maya:", err);
+      }
+      return null;
+    }
+  }
+
+  function resetAnalyzerPanel() {
+    state.inspectedSegment = null;
+    $("activeClipBadge").textContent = "Sin clip seleccionado";
+    $("activeLangBadge").classList.add("d-none");
+    $("activeAlignmentBadge").classList.add("d-none");
+    $("analyzedFilename").textContent = "Selecciona o graba un clip para inspeccionar su prosodia";
+    $("analyzedSpeakerSub").textContent = "Los resultados acústicos aparecerán aquí automáticamente.";
+
+    const player = $("analyzedAudioPlayer");
+    player.pause();
+    player.removeAttribute("src");
+    try {
+      player.load();
+    } catch {
+      // Ignorar
+    }
+    player.classList.add("d-none");
+
+    $("metricF0Mean").textContent = "-- Hz";
+    $("metricF0Range").textContent = "Rango: --";
+    $("metricStStd").textContent = "-- ST";
+    $("metricStRange").textContent = "Excursión: --";
+    $("metricGlottalCount").textContent = "--";
+    $("metricGlottalTimes").textContent = "Caídas <20ms";
+    $("metricGlottalTimes").title = "";
+    $("metricFormants").textContent = "-- / --";
+    $("metricHnrSnr").textContent = "-- / --";
+    $("metricVoiced").textContent = "Sonoridad: --%";
+    $("metricConfidence").textContent = "--%";
+    $("metricDuration").textContent = "Duración: --s";
+
+    if (state.pitchChart) {
+      state.pitchChart.data.datasets[0].data = new Array(30).fill(0);
+      state.pitchChart.update();
+    }
+    if (state.vowelChart) {
+      state.vowelChart.data.datasets[1].data = [];
+      state.vowelChart.data.datasets[2].data = [];
+      state.vowelChart.update();
+    }
+
+    const editor = $("transcriptEditor");
+    editor.value = "";
+    editor.disabled = true;
+
+    const valSwitch = $("segmentValidatedSwitch");
+    valSwitch.checked = true;
+    valSwitch.disabled = true;
+
+    $("btnSaveTranscript").disabled = true;
+    $("rawWhisperReference").textContent = "Salida cruda Whisper: --";
+    $("glottalBadgesContainer").innerHTML = "";
+    highlightInspectedRow();
+  }
+
+  function renderAnalyzedSegment(seg) {
+    if (!seg) return;
+    state.inspectedSegment = seg;
+    const m = seg.metrics || {};
+    const spk = seg.speaker || {};
+
+    $("activeClipBadge").textContent = `Clip #${seg.id} · ${seg.source_type === "mic" ? "Micrófono" : "Silero VAD"}`;
+
+    const langBadge = $("activeLangBadge");
+    const langCode = seg.language_code || "es_yuc";
+    langBadge.textContent =
+      langCode === "yua" ? "YUA · 1984" : langCode === "yua_es" ? "YUA + ES" : "ES · YUC";
+    langBadge.classList.remove("d-none");
+
+    const alignBadge = $("activeAlignmentBadge");
+    const alignScore = Number(m.phonetic_alignment_score || 0);
+    if (alignScore > 0) {
+      alignBadge.textContent = `Alineación G2P: ${alignScore.toFixed(1)}%`;
+      alignBadge.classList.remove("d-none");
+    } else {
+      alignBadge.classList.add("d-none");
+    }
+
+    $("analyzedFilename").textContent = seg.filename;
+    $("analyzedSpeakerSub").textContent = spk.speaker_code
+      ? `${spk.speaker_code} — ${spk.name} (${spk.subregion} · Acento ${spk.accent_intensity})`
+      : `Hablante ID ${seg.speaker_id}`;
+
+    const player = $("analyzedAudioPlayer");
+    player.src = seg.audio_url;
+    player.classList.remove("d-none");
+
+    // Tarjetas de métricas
+    $("metricF0Mean").textContent = `${Number(m.f0_mean_hz || 0).toFixed(1)} Hz`;
+    $("metricF0Range").textContent = `${Math.round(m.f0_min_hz || 0)}–${Math.round(m.f0_max_hz || 0)} Hz`;
+
+    $("metricStStd").textContent = `±${Number(m.f0_semitones_std || 0).toFixed(2)} ST`;
+    $("metricStRange").textContent = `Δ ${Number(m.f0_semitones_range || 0).toFixed(1)} ST`;
+
+    const glottals = Number(m.glottal_stops_count || 0);
+    const glottalTimes = Array.isArray(m.glottal_stop_timestamps) ? m.glottal_stop_timestamps : [];
+    $("metricGlottalCount").textContent = String(glottals);
+    const timesFormatted = glottalTimes.length
+      ? glottalTimes.map((t) => `${Number(t).toFixed(2)}s`).join(", ")
+      : "Sin saltillos abruptos";
+    $("metricGlottalTimes").textContent = timesFormatted;
+    $("metricGlottalTimes").title = timesFormatted;
+
+    $("metricFormants").textContent = `${Math.round(m.f1_mean_hz || 0)} / ${Math.round(m.f2_mean_hz || 0)}`;
+    $("metricHnrSnr").textContent = `${Number(m.hnr_db || 0).toFixed(1)} / ${Number(m.snr_db || 0).toFixed(1)} dB`;
+    $("metricVoiced").textContent = `Sonoridad: ${Math.round(Number(m.voiced_fraction || 0) * 100)}%`;
+
+    const confPct = seg.asr_confidence != null ? `${Math.round(seg.asr_confidence * 100)}%` : "N/A";
+    $("metricConfidence").textContent = confPct;
+    $("metricDuration").textContent = `Duración: ${Number(seg.duration_sec || 0).toFixed(2)}s`;
+
+    // Actualizar Gráfica 1: Curva de 30 puntos en Semitonos
+    const curve =
+      Array.isArray(m.f0_curve_semitones) && m.f0_curve_semitones.length > 0
+        ? m.f0_curve_semitones
+        : new Array(30).fill(0);
+    state.pitchChart.data.datasets[0].data = curve;
+    state.pitchChart.update();
+
+    // Actualizar Gráfica 2: Mapa de Vocales F1/F2
+    const scatterPts = Array.isArray(m.vowel_space_points)
+      ? m.vowel_space_points.map((pt) => ({ x: pt.f2, y: pt.f1, t: pt.t }))
+      : [];
+    state.vowelChart.data.datasets[1].data = scatterPts;
+    state.vowelChart.data.datasets[2].data =
+      m.f1_mean_hz > 0 && m.f2_mean_hz > 0
+        ? [{ x: m.f2_mean_hz, y: m.f1_mean_hz }]
+        : [];
+    state.vowelChart.update();
+
+    // Editor de transcripción
+    const editor = $("transcriptEditor");
+    editor.disabled = false;
+    editor.value = seg.transcript || "";
+
+    const valSwitch = $("segmentValidatedSwitch");
+    valSwitch.disabled = false;
+    valSwitch.checked = Boolean(seg.is_validated);
+
+    $("btnSaveTranscript").disabled = false;
+    $("rawWhisperReference").textContent = `Whisper original: "${seg.raw_transcript || "—"}"`;
+
+    // Chips interactivos para saltar al instante exacto de cada corte glotal en el audio
+    const badgesEl = $("glottalBadgesContainer");
+    if (glottalTimes.length > 0) {
+      badgesEl.innerHTML =
+        `<span class="text-secondary me-1">Escuchar [ʔ]:</span>` +
+        glottalTimes
+          .map(
+            (t) =>
+              `<button type="button" class="btn btn-xs btn-outline-warning py-0 px-1 me-1 glottal-seek-btn" data-time="${t}">${Number(
+                t
+              ).toFixed(2)}s</button>`
+          )
+          .join("");
+      badgesEl.querySelectorAll(".glottal-seek-btn").forEach((b) => {
+        b.addEventListener("click", () => {
+          const targetSec = Math.max(0, Number(b.dataset.time) - 0.15);
+          player.currentTime = targetSec;
+          player.play().catch(() => {});
+        });
+      });
+    } else {
+      badgesEl.innerHTML = "";
+    }
+
+    // Poblar Laboratorio Fonológico G2P Maya 1984 y Glosa Gramatical
+    if (seg.transcript) {
+      $("liveG2pInput").value = seg.transcript;
+      if (seg.grammatical_analysis) {
+        renderMayaLinguisticsLab(seg.grammatical_analysis);
+      } else {
+        runLiveMayaAnalysis(seg.transcript);
+      }
+    }
+
+    highlightInspectedRow();
+  }
+
+  async function saveInspectedTranscript() {
+    if (!state.inspectedSegment) return;
+    const segId = state.inspectedSegment.id;
+    const payload = {
+      transcript: $("transcriptEditor").value.trim(),
+      is_validated: $("segmentValidatedSwitch").checked,
+    };
+
+    try {
+      const res = await apiFetch(`/api/segments/${segId}/transcript`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      renderAnalyzedSegment(res.segment);
+      await Promise.all([loadSegments(false), loadStats()]);
+      showToast(`Transcripción y análisis G2P del clip #${segId} actualizados.`, "success");
+    } catch (err) {
+      showToast(`Error al guardar transcripción: ${err.message}`, "danger");
+    }
+  }
+
+  // ==========================================================================
+  // 5. Explorador del Dataset SQLite y Exportación Coqui / XTTS (Panel 4)
+  // ==========================================================================
+  async function loadSegments(autoInspectFirstIfEmpty = true) {
+    const params = new URLSearchParams();
+    const spkId = $("filterSpeakerSelect").value;
+    const langCode = $("filterLanguageSelect")?.value || "";
+    const sub = $("filterSubregionSelect").value;
+    const valOnly = $("filterValidatedOnly").checked;
+    const search = $("filterSearchInput").value.trim();
+
+    if (spkId) params.set("speaker_id", spkId);
+    if (langCode) params.set("language_code", langCode);
+    if (sub) params.set("subregion", sub);
+    if (valOnly) params.set("validated_only", "true");
+    if (search) params.set("search", search);
+
+    try {
+      const data = await apiFetch(`/api/segments?${params.toString()}`);
+      state.segments = data.segments || [];
+      renderSegmentsTable();
+
+      if (autoInspectFirstIfEmpty && !state.inspectedSegment && state.segments.length > 0) {
+        renderAnalyzedSegment(state.segments[0]);
+      } else if (!state.inspectedSegment && state.segments.length === 0) {
+        resetAnalyzerPanel();
+      }
+    } catch (err) {
+      showToast(`Error al cargar tabla de clips: ${err.message}`, "danger");
+    }
+  }
+
+  function highlightInspectedRow() {
+    const activeId = state.inspectedSegment?.id;
+    document.querySelectorAll("#segmentsTableBody tr[data-seg-id]").forEach((row) => {
+      if (Number(row.dataset.segId) === activeId) {
+        row.classList.add("active-inspected-row");
+      } else {
+        row.classList.remove("active-inspected-row");
+      }
+    });
+  }
+
+  function renderSegmentsTable() {
+    const tbody = $("segmentsTableBody");
+    if (!state.segments.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" class="text-center text-secondary py-4">
+            <i class="bi bi-inbox fs-4 d-block mb-1"></i>
+            No hay clips procesados que coincidan con el filtro actual. Graba desde el micrófono o sube una entrevista arriba.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = state.segments
+      .map((seg) => {
+        const spk = seg.speaker || {};
+        const m = seg.metrics || {};
+        const isCurrent = state.inspectedSegment?.id === seg.id;
+        const valBadge = seg.is_validated
+          ? `<span class="badge bg-success bg-opacity-25 text-emerald border border-success border-opacity-25">Validado</span>`
+          : `<span class="badge bg-warning bg-opacity-25 text-amber border border-warning border-opacity-25">Pendiente</span>`;
+
+        const alignScore = Number(m.phonetic_alignment_score || 0);
+        const alignHtml =
+          alignScore > 0
+            ? `<div class="xsmall text-purple mono-font mt-1">G2P ${alignScore.toFixed(0)}%</div>`
+            : "";
+        const ipaLine = seg.ipa_phonemes
+          ? `<div class="xsmall text-info mono-font mt-1 text-truncate" style="max-width: 310px" title="${escapeHtml(
+              seg.ipa_phonemes
+            )}">${escapeHtml(seg.ipa_phonemes)}</div>`
+          : "";
+
+        return `
+          <tr data-seg-id="${seg.id}" class="${isCurrent ? "active-inspected-row" : ""}">
+            <td>
+              <div class="d-flex align-items-center gap-1 mb-1">
+                <span class="fw-semibold mono-font text-info small">#${seg.id} · ${escapeHtml(spk.speaker_code || "")}</span>
+                ${formatLangPill(seg.language_code)}
+              </div>
+              <div class="xsmall text-secondary">${escapeHtml(spk.name || "")} · ${escapeHtml(spk.subregion || "")}</div>
+            </td>
+            <td>
+              <audio controls preload="none" src="${escapeHtml(seg.audio_url)}" class="table-audio-inline"></audio>
+              <div class="xsmall text-secondary mono-font text-truncate" style="max-width: 195px" title="${escapeHtml(seg.filename)}">
+                ${escapeHtml(seg.filename)}
+              </div>
+            </td>
+            <td>
+              <div class="input-group input-group-sm">
+                <input
+                  type="text"
+                  class="form-control form-control-sm row-transcript-input"
+                  value="${escapeHtml(seg.transcript || "")}"
+                  placeholder="Sin transcripción..."
+                />
+                <button
+                  type="button"
+                  class="btn btn-outline-info btn-save-row"
+                  title="Guardar edición, recalcular G2P y validar clip"
+                >
+                  <i class="bi bi-check2"></i>
+                </button>
+              </div>
+              ${ipaLine}
+            </td>
+            <td class="text-center mono-font small">${Number(seg.duration_sec || 0).toFixed(2)}s</td>
+            <td class="text-center mono-font small">
+              <div>${Number(m.f0_mean_hz || 0).toFixed(0)} Hz</div>
+              <span class="xsmall text-cyan">±${Number(m.f0_semitones_std || 0).toFixed(2)} ST</span>
+            </td>
+            <td class="text-center mono-font">
+              <span class="badge bg-dark border border-secondary-subtle text-amber">
+                ${m.glottal_stops_count ?? 0}
+              </span>
+              ${alignHtml}
+            </td>
+            <td class="text-center mono-font xsmall">
+              <div>SNR ${Number(m.snr_db || 0).toFixed(1)} dB</div>
+              <div class="text-secondary">HNR ${Number(m.hnr_db || 0).toFixed(1)} dB</div>
+            </td>
+            <td class="text-center">${valBadge}</td>
+            <td class="text-end">
+              <div class="btn-group btn-group-sm">
+                <button
+                  type="button"
+                  class="btn btn-outline-info btn-inspect-row"
+                  title="Cargar en el Analizador Visual y Laboratorio G2P Maya"
+                >
+                  <i class="bi bi-graph-up"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline-danger btn-delete-row"
+                  title="Eliminar clip de SQLite y borrar WAV"
+                >
+                  <i class="bi bi-trash3"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    // Vincular eventos por fila
+    tbody.querySelectorAll("tr[data-seg-id]").forEach((row) => {
+      const segId = Number(row.dataset.segId);
+      const segObj = state.segments.find((s) => s.id === segId);
+      if (!segObj) return;
+
+      row.querySelector(".btn-inspect-row").addEventListener("click", () => {
+        renderAnalyzedSegment(segObj);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+
+      const inputEl = row.querySelector(".row-transcript-input");
+      const saveRowFn = async () => {
+        try {
+          const res = await apiFetch(`/api/segments/${segId}/transcript`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              transcript: inputEl.value.trim(),
+              is_validated: true,
+            }),
+          });
+          if (state.inspectedSegment?.id === segId) {
+            renderAnalyzedSegment(res.segment);
+          }
+          await Promise.all([loadSegments(false), loadStats()]);
+          showToast(`Clip #${segId} guardado y G2P recalculado.`, "success");
+        } catch (err) {
+          showToast(`No se pudo actualizar el clip #${segId}: ${err.message}`, "danger");
+        }
+      };
+
+      row.querySelector(".btn-save-row").addEventListener("click", saveRowFn);
+      inputEl.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          saveRowFn();
+        }
+      });
+
+      row.querySelector(".btn-delete-row").addEventListener("click", async () => {
+        const confirmDel = window.confirm(
+          `¿Eliminar el clip "${segObj.filename}" de SQLite y del disco duro?`
+        );
+        if (!confirmDel) return;
+        try {
+          releaseAudioPlayers(segObj.audio_url);
+          await apiFetch(`/api/segments/${segId}`, { method: "DELETE" });
+          if (state.inspectedSegment?.id === segId) {
+            resetAnalyzerPanel();
+          }
+          await Promise.all([loadSegments(true), loadStats(), loadSpeakers()]);
+          showToast(`Clip ${segObj.filename} eliminado.`, "info");
+        } catch (err) {
+          showToast(`Error al eliminar clip: ${err.message}`, "danger");
+        }
+      });
+    });
+  }
+
+  async function handleExportDataset() {
+    const datasetName = $("exportDatasetName").value.trim() || "accentlab_maya1984_tts";
+    const speakerVal = $("filterSpeakerSelect").value;
+    const langVal = $("filterLanguageSelect")?.value || "";
+    const subregionVal = $("filterSubregionSelect").value;
+    const minSnrRaw = $("exportMinSnr").value.trim();
+    const textFormat = $("exportTextFormat")?.value || "orthographic_1984";
+
+    const payload = {
+      dataset_name: datasetName,
+      speaker_id: speakerVal ? Number(speakerVal) : null,
+      language_code: langVal || null,
+      subregion: subregionVal || null,
+      validated_only: true,
+      min_snr_db: minSnrRaw !== "" ? Number(minSnrRaw) : null,
+      text_format: textFormat,
+    };
+
+    const btn = $("btnExportDataset");
+    btn.disabled = true;
+    try {
+      const res = await apiFetch("/api/export-dataset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const banner = $("exportResultBanner");
+      banner.classList.remove("d-none");
+      banner.innerHTML = `
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+          <div>
+            <div class="fw-semibold text-emerald">
+              <i class="bi bi-check2-all me-1"></i>Dataset Exportado: <span class="mono-font">${escapeHtml(res.export_name)}</span>
+              <span class="badge bg-dark border border-secondary-subtle text-info mono-font ms-1">${escapeHtml(
+                res.text_format || textFormat
+              )}</span>
+            </div>
+            <div class="small text-secondary">
+              ${res.exported_clips} archivos WAV (24kHz 16-bit Mono) · ${res.exported_speakers} hablante(s) · ${res.total_duration_sec}s totales · Ruta local: <code class="text-light">${escapeHtml(res.export_dir)}</code>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="${escapeHtml(res.metadata_csv_url)}" target="_blank" class="btn btn-sm btn-outline-light mono-font">
+              <i class="bi bi-filetype-csv me-1"></i>metadata.csv
+            </a>
+            <a href="${escapeHtml(res.manifest_json_url)}" target="_blank" class="btn btn-sm btn-outline-info mono-font">
+              <i class="bi bi-filetype-json me-1"></i>manifest.json
+            </a>
+            <a href="${escapeHtml(res.download_url)}" download class="btn btn-sm btn-emerald fw-semibold">
+              <i class="bi bi-download me-1"></i>Descargar ZIP (${escapeHtml(res.zip_filename)})
+            </a>
+          </div>
+        </div>
+      `;
+
+      showToast(`Dataset ${res.export_name} generado (${res.exported_clips} clips · ${textFormat}).`, "success");
+    } catch (err) {
+      showToast(`No se pudo exportar el dataset: ${err.message}`, "warning");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ==========================================================================
+  // Registro de Eventos e Inicialización General
+  // ==========================================================================
+  function bindEvents() {
+    // Panel 1
+    $("speakerForm").addEventListener("submit", handleCreateSpeaker);
+    $("activeSpeakerSelect").addEventListener("change", updateActiveSpeakerMeta);
+    $("btnDeleteSpeaker").addEventListener("click", handleDeleteSpeaker);
+
+    $("sessionLanguageSelect").addEventListener("change", (ev) => {
+      state.languageMode = ev.target.value || "auto";
+      const hintBadge = $("sessionLangHintBadge");
+      if (hintBadge) {
+        hintBadge.textContent =
+          state.languageMode === "yua"
+            ? "MAYA 1984"
+            : state.languageMode === "es_yuc"
+            ? "ES · YUC"
+            : "AUTO";
+      }
+      rebuildFilteredPromptsByLanguage();
+    });
+
+    document.querySelectorAll('input[name="promptModeRadio"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        const isTrap = getActivePromptMode() === "trap_phrase";
+        $("trapPhraseContainer").classList.toggle("d-none", !isTrap);
+        $("spontaneousContainer").classList.toggle("d-none", isTrap);
+      });
+    });
+
+    $("promptCategoryFilter").addEventListener("change", (ev) => {
+      const cat = ev.target.value;
+      const langMode = state.languageMode || "auto";
+      const basePool =
+        langMode === "auto"
+          ? state.allPrompts
+          : state.allPrompts.filter((p) => (p.language || "es_yuc") === langMode);
+
+      state.filteredPrompts = cat
+        ? basePool.filter((p) => p.category === cat)
+        : [...basePool];
+      state.currentPromptIdx = 0;
+      state.customOverridePrompt = "";
+      renderCurrentPrompt();
+    });
+
+    $("btnPrevPrompt").addEventListener("click", () => {
+      state.customOverridePrompt = "";
+      state.currentPromptIdx -= 1;
+      renderCurrentPrompt();
+    });
+    $("btnNextPrompt").addEventListener("click", () => {
+      state.customOverridePrompt = "";
+      state.currentPromptIdx += 1;
+      renderCurrentPrompt();
+    });
+    $("btnRandomPrompt").addEventListener("click", () => {
+      if (state.filteredPrompts.length > 1) {
+        state.customOverridePrompt = "";
+        state.currentPromptIdx = Math.floor(Math.random() * state.filteredPrompts.length);
+        renderCurrentPrompt();
+      }
+    });
+    $("btnSendPromptToG2p")?.addEventListener("click", () => {
+      const txt = getActivePromptText();
+      if (txt) {
+        $("liveG2pInput").value = txt;
+        runLiveMayaAnalysis(txt);
+        $("mayaG2pLabCard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+
+    // Panel 2 — Grabación directa
+    $("btnStartRec").addEventListener("click", startRecording);
+    $("btnStopRec").addEventListener("click", stopRecording);
+    $("btnDiscardClip").addEventListener("click", discardRecordedPreview);
+    $("btnUploadRecordedClip").addEventListener("click", uploadRecordedClip);
+
+    // Panel 2 — Drag & Drop VAD
+    const dropZone = $("dropZone");
+    const fileInput = $("longAudioInput");
+
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        fileInput.click();
+      }
+    });
+    fileInput.addEventListener("change", (ev) => {
+      if (ev.target.files?.length) handleLongFileSelection(ev.target.files[0]);
+    });
+
+    ["dragenter", "dragover"].forEach((evtName) => {
+      dropZone.addEventListener(evtName, (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        dropZone.classList.add("drag-over");
+      });
+    });
+    ["dragleave", "drop"].forEach((evtName) => {
+      dropZone.addEventListener(evtName, (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        dropZone.classList.remove("drag-over");
+      });
+    });
+    dropZone.addEventListener("drop", (ev) => {
+      const files = ev.dataTransfer?.files;
+      if (files?.length) handleLongFileSelection(files[0]);
+    });
+
+    $("btnProcessLongAudio").addEventListener("click", processLongAudioUpload);
+
+    // Panel 3 — Editor de Transcripción + Laboratorio Fonológico G2P Maya 1984 en Vivo
+    $("btnSaveTranscript").addEventListener("click", saveInspectedTranscript);
+
+    let g2pTimer = null;
+    $("liveG2pInput").addEventListener("input", () => {
+      clearTimeout(g2pTimer);
+      g2pTimer = setTimeout(() => runLiveMayaAnalysis(), 240);
+    });
+    $("liveG2pInput").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        runLiveMayaAnalysis();
+      }
+    });
+    $("btnRunLiveG2p").addEventListener("click", () => runLiveMayaAnalysis());
+
+    $("btnUseLiveG2pAsPrompt").addEventListener("click", async () => {
+      const res = await runLiveMayaAnalysis();
+      if (!res || !res.normalized_1984) return;
+
+      state.customOverridePrompt = res.normalized_1984;
+      $("modeTrapPhrase").checked = true;
+      $("trapPhraseContainer").classList.remove("d-none");
+      $("spontaneousContainer").classList.add("d-none");
+
+      $("promptCategoryBadge").textContent = "Frase Personalizada G2P (Norma 1984)";
+      $("promptIdBadge").textContent = "LIVE_G2P";
+      $("promptReadingText").textContent = `«${res.normalized_1984}»`;
+      $("promptPhenomenonText").textContent = `AFI: ${res.ipa_transcription} · Significado: ${res.semantic_translation_es}`;
+
+      if (res.language_code === "yua") {
+        $("sessionLanguageSelect").value = "yua";
+        state.languageMode = "yua";
+        $("sessionLangHintBadge").textContent = "MAYA 1984";
+      }
+      showToast(`Frase "${res.normalized_1984}" lista en el Panel 01 para grabar.`, "info");
+    });
+
+    document.querySelectorAll(".g2p-preset-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const phrase = btn.dataset.phrase || "";
+        $("liveG2pInput").value = phrase;
+        runLiveMayaAnalysis(phrase);
+      });
+    });
+
+    // Panel 4
+    let searchTimer = null;
+    $("filterSearchInput").addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => loadSegments(false), 260);
+    });
+    $("filterSpeakerSelect").addEventListener("change", () => loadSegments(false));
+    $("filterLanguageSelect")?.addEventListener("change", () => loadSegments(false));
+    $("filterSubregionSelect").addEventListener("change", () => loadSegments(false));
+    $("filterValidatedOnly").addEventListener("change", () => loadSegments(false));
+    $("btnRefreshSegments").addEventListener("click", () => {
+      loadStats();
+      loadSegments(false);
+    });
+    $("btnExportDataset").addEventListener("click", handleExportDataset);
+
+    // Pausar automáticamente otros reproductores <audio> cuando uno comienza a sonar
+    document.addEventListener(
+      "play",
+      (ev) => {
+        if (ev.target && ev.target.tagName === "AUDIO") {
+          pauseAllAudioElements(ev.target);
+        }
+      },
+      true
+    );
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    drawIdleCanvas();
+    initCharts();
+    bindEvents();
+    await Promise.all([loadPrompts(), loadSpeakers(), loadStats(), loadSegments()]);
+    runLiveMayaAnalysis();
+    refreshMicDevices();
+  });
+})();

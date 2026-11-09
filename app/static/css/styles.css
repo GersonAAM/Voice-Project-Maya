@@ -1,0 +1,541 @@
+/* ============================================================================
+   AccentLab Web — Hoja de Estilos Modo Oscuro Profesional (DSP Studio UI)
+   ============================================================================ */
+
+:root {
+  --bg-canvas: #090d16;
+  --bg-card: #111827;
+  --bg-card-elevated: #172033;
+  --bg-input: #0d1321;
+  --border-subtle: rgba(148, 163, 184, 0.16);
+  --border-highlight: rgba(56, 189, 248, 0.42);
+  --accent-cyan: #38bdf8;
+  --accent-emerald: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-purple: #a78bfa;
+  --accent-rose: #f43f5e;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+}
+
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(circle at 12% 0%, rgba(56, 189, 248, 0.08), transparent 38%),
+              radial-gradient(circle at 88% 10%, rgba(16, 185, 129, 0.06), transparent 35%),
+              var(--bg-canvas);
+  color: var(--text-main);
+  min-height: 100vh;
+}
+
+.mono-font {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.xsmall {
+  font-size: 0.76rem;
+}
+
+.text-emerald {
+  color: var(--accent-emerald) !important;
+}
+
+.text-cyan {
+  color: var(--accent-cyan) !important;
+}
+
+.text-amber {
+  color: var(--accent-amber) !important;
+}
+
+.text-purple {
+  color: var(--accent-purple) !important;
+}
+
+.bg-purple-subtle {
+  background-color: rgba(167, 139, 250, 0.14);
+  color: var(--accent-purple);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+.bg-emerald-subtle {
+  background-color: rgba(16, 185, 129, 0.14);
+  color: var(--accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.32);
+}
+
+/* --- Barra superior e indicadores globales --- */
+.navbar-studio {
+  background: rgba(9, 13, 22, 0.88);
+  backdrop-filter: blur(14px);
+  border-color: var(--border-subtle) !important;
+}
+
+.brand-badge {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 1.35rem;
+  color: #06121e;
+  background: linear-gradient(135deg, #38bdf8 0%, #10b981 100%);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.28);
+}
+
+.kpi-pill {
+  background: rgba(23, 32, 51, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  padding: 0.3rem 0.68rem;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.kpi-label {
+  font-size: 0.67rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.kpi-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* --- Tarjetas principales de los 4 paneles --- */
+.studio-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+.studio-card-header {
+  padding: 0.85rem 1.15rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.studio-card-body {
+  padding: 1.1rem 1.15rem;
+}
+
+.panel-step {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.18rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.btn-xs {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.76rem;
+  border-radius: 6px;
+}
+
+.btn-emerald {
+  background: linear-gradient(135deg, #10b981, #059669);
+  border: none;
+  color: #04130e;
+}
+
+.btn-emerald:hover,
+.btn-emerald:focus {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  color: #04130e;
+}
+
+/* --- Panel 1: Hablante y Escenario de Lectura --- */
+.speaker-form-box {
+  background: var(--bg-card-elevated);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.prompt-stage {
+  background: linear-gradient(180deg, rgba(23, 32, 51, 0.9), rgba(13, 19, 33, 0.95));
+  border: 1px solid var(--border-subtle);
+}
+
+.prompt-reading-text {
+  font-size: 1.08rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #f8fafc;
+  padding: 0.65rem 0.85rem;
+  background: rgba(9, 13, 22, 0.65);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: 0 8px 8px 0;
+}
+
+/* --- Panel 2: Estudio de Grabación, Canvas y Drag & Drop --- */
+.nav-pills-studio .nav-link {
+  padding: 0.24rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  border-radius: 7px;
+}
+
+.nav-pills-studio .nav-link.active {
+  background-color: rgba(56, 189, 248, 0.18);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.canvas-wrapper {
+  background: #060911;
+  border: 1px solid var(--border-subtle);
+  height: 152px;
+}
+
+#waveformCanvas {
+  width: 100%;
+  height: 152px;
+  display: block;
+}
+
+.canvas-overlay-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.canvas-overlay-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(0deg, rgba(6, 9, 17, 0.88), transparent);
+  pointer-events: none;
+}
+
+.rec-dot-active {
+  color: var(--accent-rose) !important;
+  animation: pulse-rec 1s infinite ease-in-out;
+}
+
+@keyframes pulse-rec {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(0.82);
+  }
+}
+
+.preview-box {
+  background: var(--bg-card-elevated);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+}
+
+.drop-zone {
+  background: rgba(13, 19, 33, 0.8);
+  border: 2px dashed rgba(56, 189, 248, 0.32);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.drop-zone:hover,
+.drop-zone.drag-over {
+  background: rgba(56, 189, 248, 0.08);
+  border-color: var(--accent-cyan);
+  transform: translateY(-1px);
+}
+
+.processing-banner {
+  background: rgba(56, 189, 248, 0.09);
+  border: 1px solid rgba(56, 189, 248, 0.32);
+}
+
+/* --- Panel 3: Analizador Visual de Acento --- */
+.analyzer-player-bar {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.studio-audio {
+  height: 36px;
+}
+
+.studio-audio-compact {
+  height: 34px;
+  max-width: 270px;
+}
+
+.metric-tile {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  height: 100%;
+  transition: border-color 0.15s ease;
+}
+
+.metric-tile:hover {
+  border-color: var(--border-highlight);
+}
+
+.metric-title {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-bottom: 0.15rem;
+}
+
+.metric-val {
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.metric-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.chart-panel {
+  background: #0b101d;
+  border: 1px solid var(--border-subtle);
+}
+
+.chart-box {
+  position: relative;
+  height: 235px;
+  width: 100%;
+}
+
+.transcript-editor-box {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+#transcriptEditor {
+  background-color: var(--bg-input);
+  border-color: var(--border-subtle);
+  color: #f8fafc;
+  font-size: 0.92rem;
+}
+
+#transcriptEditor:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 0.2rem rgba(56, 189, 248, 0.15);
+}
+
+/* --- Panel 4: Explorador de Dataset y Exportación --- */
+.export-banner {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.subregion-chip {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.75rem;
+}
+
+.studio-table thead th {
+  background: #0c1220;
+  color: var(--text-muted);
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom-color: var(--border-subtle);
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+
+.studio-table tbody td {
+  font-size: 0.84rem;
+  border-color: rgba(148, 163, 184, 0.1);
+  vertical-align: middle;
+}
+
+.studio-table tbody tr.active-inspected-row {
+  background-color: rgba(56, 189, 248, 0.09) !important;
+}
+
+.table-audio-inline {
+  height: 30px;
+  width: 195px;
+}
+
+/* Scrollbar sutil en modo oscuro */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #263248;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3b4c6b;
+}
+
+/* ============================================================================
+   Laboratorio Fonológico G2P Maya 1984 y Glosa Interlineal Leipzig (v2.0)
+   ============================================================================ */
+.maya-lab-card {
+  background: linear-gradient(180deg, rgba(16, 24, 41, 0.96), rgba(10, 15, 27, 0.98));
+  border: 1px solid rgba(16, 185, 129, 0.34);
+  box-shadow: inset 0 1px 0 rgba(56, 189, 248, 0.08);
+}
+
+.maya-lab-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #04130e;
+  background: linear-gradient(135deg, #10b981, #38bdf8);
+  font-size: 0.95rem;
+}
+
+.g2p-tester-bar {
+  background: rgba(9, 13, 22, 0.72);
+  border: 1px solid var(--border-subtle);
+}
+
+#liveG2pInput {
+  background-color: var(--bg-input);
+  border-color: var(--border-subtle);
+  color: #f8fafc;
+}
+
+.phon-output-box {
+  background: #080c15;
+  border: 1px solid var(--border-subtle);
+}
+
+.grammar-box {
+  background: rgba(13, 19, 33, 0.85);
+  border: 1px solid var(--border-subtle);
+}
+
+/* Código cromático fonológico para Eyectivas C', Rearticuladas V'V, Glotales V' y Tonos Altos V́V */
+.phon-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.14rem 0.42rem;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.phon-ejective {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.48);
+}
+
+.phon-reart {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.52);
+}
+
+.phon-glottal {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.phon-hightone {
+  background: rgba(167, 139, 250, 0.22);
+  color: #ddd6fe;
+  border: 1px solid rgba(167, 139, 250, 0.52);
+}
+
+.phon-lowlong {
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.36);
+}
+
+.phon-implosive {
+  background: rgba(45, 212, 191, 0.15);
+  color: #5eead4;
+  border: 1px solid rgba(45, 212, 191, 0.38);
+}
+
+.phon-plain {
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.phon-word-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+}
+
+.phon-sep {
+  color: #64748b;
+  font-weight: 700;
+  padding: 0 0.2rem;
+}
+
+/* Tarjetas de Glosa Interlineal Leipzig */
+.morpheme-card {
+  background: #090e1a;
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 8px;
+  padding: 0.42rem 0.6rem;
+  min-width: 118px;
+  flex: 1 1 auto;
+  max-width: 240px;
+}
+
+.morpheme-surface {
+  font-weight: 700;
+  color: #f8fafc;
+  font-size: 0.85rem;
+}
+
+.morpheme-seg {
+  font-size: 0.74rem;
+  color: var(--accent-cyan);
+}
+
+.morpheme-gloss {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent-amber);
+}
+
+.morpheme-meaning {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.25;
+}

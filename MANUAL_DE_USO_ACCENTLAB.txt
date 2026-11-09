@@ -1,0 +1,439 @@
+================================================================================
+                     MANUAL PRÁCTICO DE USO — ACCENTLAB WEB v2.0
+             Guía Paso a Paso para Cualquier Usuario (Sin Programación)
+================================================================================
+
+¡Bienvenido(a)! Este manual está pensado para que cualquier persona pueda usar
+el programa de grabación de voces **AccentLab Web v2.0** de principio a fin con
+total confianza, sin necesidad de saber programación ni informática avanzada.
+
+
+================================================================================
+ÍNDICE RÁPIDO
+================================================================================
+  1. ¿Para qué sirve este programa?
+  2. Cómo ENCENDER y cómo APAGAR el programa
+  3. Vista general de la pantalla (Las 4 secciones numeradas)
+  4. SECCIÓN 01: Cómo registrar a una persona nueva y elegir qué va a decir
+     4.1 Cómo añadir a un Nuevo Hablante
+     4.2 Cómo cambiar entre personas ya registradas (¡y cuidado al borrar!)
+     4.3 Cómo elegir el Idioma de la Sesión (Maya, Español o Automático)
+     4.4 Los 2 modos de lectura: "Frases Trampa" vs. "Habla Espontánea"
+  5. SECCIÓN 02: Cómo grabar o subir audios (Los 2 métodos disponibles)
+     5.1 Método A — Grabar en vivo con Micrófono
+     5.2 Método B — Subir una grabación larga ya hecha (Entrevistas / Celular)
+  6. SECCIÓN 03: Cómo revisar la grabación, corregir el texto y probar frases Mayas
+     6.1 Cómo saber si la grabación salió bien
+     6.2 Cómo corregir el texto escrito (Paso muy importante)
+     6.3 Cómo usar el Probador de Frases en Maya (Laboratorio G2P Maya 1984)
+  7. SECCIÓN 04: Tabla de grabaciones guardadas y cómo descargar el archivo ZIP
+     7.1 Cómo buscar, escuchar, corregir o borrar grabaciones en la tabla
+     7.2 Cómo exportar todas las grabaciones en un paquete ZIP
+  8. Consejos prácticos para que las grabaciones salgan limpias y perfectas
+  9. Solución rápida a problemas comunes (Preguntas Frecuentes)
+
+
+================================================================================
+1. ¿PARA QUÉ SIRVE ESTE PROGRAMA?
+================================================================================
+AccentLab Web sirve para **grabar, organizar y revisar voces** de personas que
+hablan **Lengua Maya Yucateca** y/o **Español Yucateco**.
+
+Todo lo que grabes aquí:
+  - Se limpia automáticamente de volumen para que suene claro.
+  - Se convierte automáticamente en texto escrito en la pantalla.
+  - Si está en lengua maya, muestra cómo se pronuncia y qué significa cada palabra.
+  - Se guarda solito en la computadora (no se pierde aunque cierres el navegador).
+
+
+================================================================================
+2. CÓMO ENCENDER Y CÓMO APAGAR EL PROGRAMA
+================================================================================
+Aunque el programa se usa dentro del navegador de internet (como Google Chrome o
+Microsoft Edge), **funciona en esta misma computadora** (no sube las voces a
+ninguna página pública). Por eso hay que encenderlo primero.
+
+PASOS PARA ENCENDERLO:
+  1) Abre la carpeta del proyecto en la computadora:
+       C:\Users\gersonaam\Documents\VoiceProject
+  2) En la barra de dirección arriba de esa carpeta, haz clic, escribe:
+       powershell
+     y presiona la tecla [Enter]. Se abrirá una ventana oscura o azul.
+  3) Copia y pega exactamente esta línea y presiona [Enter]:
+       .\.venv\Scripts\python.exe run.py
+  4) Espera unos 3 segundos hasta que aparezca un mensaje parecido a:
+       Uvicorn running on http://127.0.0.1:8000
+     IMPORTANTE: **NO cierres esa ventana oscura** mientras estés trabajando;
+     solo minimízala.
+  5) Abre **Google Chrome** o **Microsoft Edge**, escribe arriba en la barra de
+     direcciones exactamente esto y presiona [Enter]:
+       http://127.0.0.1:8000
+  6) ¡Listo! Ya verás la pantalla oscura del estudio **AccentLab Web v2.0**.
+
+     NOTA DE PRIMERA VEZ: Cuando presiones "Grabar" por primera vez, el navegador
+     mostrará un cuadrito arriba a la izquierda preguntando:
+     "¿Permitir que este sitio use el micrófono?" -> Haz clic en **[Permitir]**.
+
+PASOS PARA APAGARLO CUANDO TERMINES TU SESIÓN:
+  1) Todo lo que hayas grabado y guardado ya está seguro en la computadora.
+  2) Cierra la pestaña del navegador.
+  3) Abre la ventana oscura que dejaste minimizada, presiona al mismo tiempo las
+     teclas **[Ctrl] + [C]** (una o dos veces) hasta que se detenga, y ciérrala.
+
+
+================================================================================
+3. VISTA GENERAL DE LA PANTALLA (LAS 4 SECCIONES NUMERADAS)
+================================================================================
+La pantalla está numerada del **01 al 04** para seguir el orden natural de trabajo:
+
+  - **BARRA SUPERIOR (Arriba del todo):**
+    Muestra el resumen total de cuánto trabajo llevan acumulado: cuántas personas
+    (*Hablantes*), cuántas grabaciones (*Clips*), cuántos minutos de *Audio Limpio*
+    llevan y cuántos *Saltillos* se han detectado.
+
+  - **CAJA [01] Perfil de Hablante & Guion Fonético (Arriba a la izquierda):**
+    Aquí registras o eliges **QUIÉN** va a hablar, **EN QUÉ IDIOMA** y **QUÉ** frase
+    va a decir.
+
+  - **CAJA [02] Estudio de Grabación & Segmentación (Abajo a la izquierda):**
+    Aquí están los botones para **GRABAR con micrófono** o **SUBIR un audio largo**.
+
+  - **CAJA [03] Analizador Visual, Motor G2P Maya & Glosa (Arriba a la derecha):**
+    Aquí **ESCUCHAS** cómo quedó el audio recién grabado, **CORRIGES** el texto si
+    alguna palabra salió mal escrita y pruebas frases nuevas en lengua maya.
+
+  - **CAJA [04] Explorador del Dataset & Exportación (Abajo a lo ancho):**
+    Es la lista completa de **TODAS las grabaciones guardadas**, donde puedes
+    buscarlas, volver a oírlas, borrar las equivocadas o **DESCARGAR un ZIP**.
+
+
+================================================================================
+4. SECCIÓN [01]: CÓMO REGISTRAR A UNA PERSONA Y ELEGIR QUÉ VA A DECIR
+================================================================================
+
+4.1 Cómo añadir a una nueva persona ("Nuevo Hablante")
+------------------------------------------------------
+Cada persona que vaya a grabar su voz debe tener su propio perfil para no mezclar
+las voces de distintas personas.
+
+  1) En la esquina superior derecha de la Caja **01**, haz clic en el botón azul:
+       [+ Nuevo Hablante]
+  2) Se abrirá un pequeño formulario. Llénalo así:
+     - **Nombre o Alias:** El nombre de la persona o un apodo identificable
+       (por ejemplo: *Doña María*, *Don Wilberth*, *Joven Valladolid 1*).
+     - **Género:** Elige `M` (Masculino), `F` (Femenino) u `Otro`.
+       *(Dato importante: ayuda al programa a calibrar si la voz es grave o aguda).*
+     - **Edad:** Escribe su edad en números (por ejemplo: `45`).
+     - **Subregión:** Elige de qué zona de Yucatán proviene su acento:
+         * *Centro (Mérida / Progreso)*
+         * *Oriente (Valladolid / Tizimín)*
+         * *Sur (Ticul / Tekax / Oxkutzcab)*
+         * *Poniente (Hunucmá / Maxcanú)*
+         * *Costa Yucateca*
+         * *Otro (Contraste México)*
+     - **Intensidad Percibida:** Qué tan marcado sientes su acento regional
+       (*Suave*, *Medio* o *Marcado*).
+  3) Haz clic en el botón celeste **[Guardar y Seleccionar]**.
+  4) ¡Listo! El programa le creará un código único automático (como `YUC_ORI_001`)
+     y dejará a esa persona seleccionada para empezar a grabar.
+
+4.2 Cómo cambiar de persona (¡y precaución con el botón de basura!)
+-------------------------------------------------------------------
+  - Si van a turnarse varias personas ya registradas, simplemente abre la lista
+    desplegable **"Hablante Activo para Grabación / Carga VAD"** y elige el nombre
+    de quien tenga el turno frente al micrófono.
+  - **¡MUCHO CUIDADO CON EL BOTÓN ROJO DE BASURA** que está justo a la derecha del
+    nombre del hablante!: ese botón sirve únicamente si creaste una persona por
+    error y quieres **borrar a esa persona junto con TODAS sus grabaciones**.
+    El programa siempre te preguntará si estás seguro antes de borrar.
+
+4.3 Cómo elegir el Idioma de la Sesión
+--------------------------------------
+Debajo del hablante verás la lista **"Idioma de Sesión"**:
+  - **Maya Yucateco [Norma 1984]:** Elígelo cuando la persona vaya a leer o hablar
+    en **Lengua Maya**. Mostrará solo las frases en maya y preparará al sistema
+    para respetar la escritura maya oficial de 1984 (apóstrofos, tonos, etc.).
+  - **Español Yucateco:** Elígelo cuando la sesión sea en **Español**. Mostrará
+    las frases diseñadas para el acento y modismos de Yucatán (*mare, boxito, xix*).
+  - **Detección Automática:** Úsalo si van a ir mezclando frases en maya y en
+    español durante la misma sesión.
+
+4.4 Los 2 Modos de Lectura / Estímulo (¿Qué debe decir la persona?)
+-------------------------------------------------------------------
+Verás dos botones juntos bajo el título *"Modo de Estímulo Fonético"*:
+
+  A) **[Frases Trampa]** (Modo guiado — activado por defecto):
+     - Muestra en letras grandes y entre comillas (`« ... »`) una oración lista
+       para que la persona la lea en voz alta con naturalidad (sin actuar ni leer
+       como robot, sino como habla en su casa).
+     - Puedes usar las flechas **`<`** y **`>`** para pasar a la siguiente frase,
+       el botón de flechas cruzadas (aleatorio) para sacar una al azar, o la lista
+       *"Todas las categorías fonéticas"* para practicar un grupo específico
+       (por ejemplo: *Saludos en Maya*, *Vocales Rearticuladas*, *Cantadito*, etc.).
+     - Si quieres ver qué significa una frase maya o cómo se pronuncia antes de
+       leerla, haz clic en el botoncito **[Ver G2P / Glosa]**.
+
+  B) **[Habla Espontánea]** (Modo libre, sin leer):
+     - Úsalo cuando quieras que la persona hable con sus propias palabras (ya sea
+       en maya o en español).
+     - Ejemplo de preguntas que puedes hacerle: *"Cuéntame en unos segundos cómo
+       se prepara el frijol con puerco"*, *"¿Cómo saludo a un vecino por la mañana?"*
+       o *"¿Cómo llego de aquí al parque?"*.
+     - Lo ideal es grabar respuestas cortas de entre **4 y 9 segundos** cada una.
+
+
+================================================================================
+5. SECCIÓN [02]: CÓMO GRABAR O SUBIR AUDIOS (LOS 2 MÉTODOS DISPONIBLES)
+================================================================================
+En la esquina superior derecha de la Caja **02** verás dos pestañas:
+**[Micrófono]** y **[Audio Largo (VAD)]**.
+
+--------------------------------------------------------------------------------
+5.1 MÉTODO A — Grabar en vivo con Micrófono (Pestaña "Micrófono")
+--------------------------------------------------------------------------------
+Este es el modo principal cuando tienes a la persona frente a la computadora.
+
+PREPARACIÓN RÁPIDA:
+  1) Verifica en la Caja **01** que esté seleccionado el **nombre correcto** de la
+     persona que va a hablar.
+  2) En la lista de micrófonos, verifica que esté elegido el micrófono que van a
+     usar (o deja *"Micrófono predeterminado del sistema"*).
+  3) Deja **ENCENDIDO** el interruptor **"Captura Pura DSP"** (así el navegador no
+     deforma la voz ni borra los cortes glotales/saltillos de la lengua maya).
+
+PASOS PARA GRABAR CADA FRASE:
+  1) Haz clic en el botón rojo grande **[Grabar]**.
+  2) Espera una fracción de segundo en silencio (medio segundo) y hazle una seña a
+     la persona para que diga la frase.
+     - Verás moverse la onda azul en la pantalla y correr el reloj `00:00.0`.
+     - *Tip visual:* Cuando el reloj llega entre **03.0 y 10.0 segundos**, los
+       números se pintan de **color verde** indicando la duración ideal (aunque si
+       un saludo corto como *"Ma'alob k'iin"* dura 1.5 o 2 segundos, ¡también sirve
+       perfectamente!).
+  3) Al terminar de hablar, espera medio segundo en silencio y haz clic en el
+     botón amarillo **[Detener Grabación]**.
+  4) Aparecerá debajo el recuadro **"Escucha Previa del Clip Capturado"**:
+     - Presiona el triángulo de **Play (▶)** para escuchar cómo quedó.
+     - **¿Se equivocó, tosió, pasó una moto o se cortó el final?**
+       Haz clic en **[Descartar]** y vuelve a presionar **[Grabar]**. No se habrá
+       guardado nada malo.
+     - **¿Se escucha claro y completo?**
+       Haz clic en el botón verde **[Analizar Prosodia y Transcribir (Whisper)]**.
+  5) Espera unos segundos mientras gira el circulito de *"Analizando prosodia..."*.
+     Cuando termine, verás un aviso verde de éxito abajo a la derecha y los
+     resultados aparecerán en la Caja **03** y en la tabla de abajo (**04**).
+
+--------------------------------------------------------------------------------
+5.2 MÉTODO B — Subir una grabación larga ya hecha (Pestaña "Audio Largo (VAD)")
+--------------------------------------------------------------------------------
+Usa esta pestaña si ya tienes grabada una entrevista, cuento, monólogo o nota de
+voz larga (hecha en celular o grabadora portátil en formato `.wav`, `.mp3`, `.m4a`,
+`.ogg` o `.flac`) y quieres que el programa la **corte automáticamente en muchos
+pedacitos limpios de 3 a 10 segundos**.
+
+REGLA IMPORTANTE ANTES DE SUBIR UN AUDIO LARGO:
+  El archivo largo debe contener la voz de **UNA SOLA PERSONA** (si hay un
+  entrevistador haciendo preguntas largas entre medias, el programa pensaría que
+  ambas voces son de la misma persona).
+
+PASOS PARA SUBIRLO:
+  1) Primero selecciona en la Caja **01** a la persona dueña de esa grabación
+     (y el **Idioma de Sesión**: Maya, Español o Automático).
+  2) En la Caja **02**, haz clic en la pestaña **[Audio Largo (VAD)]**.
+  3) Arrastra tu archivo de audio desde tu carpeta hasta el recuadro punteado que
+     dice *"Arrastra aquí una entrevista, podcast o monólogo"* (o haz clic sobre
+     ese recuadro para buscar el archivo en la computadora).
+  4) Verás tres casillas con números:
+     - `Mín. (seg): 3.0` | `Máx. (seg): 10.0` | `Padding (ms): 180`
+     **No necesitas mover estos números**; ya están ajustados en sus valores ideales.
+  5) Haz clic en el botón celeste **[Segmentar con Silero VAD y Analizar Lote]**.
+  6) Ten paciencia: si el audio dura varios minutos, el programa tardará un momento
+     mientras recorta cada frase sin partir palabras y transcribe todo el lote.
+     Al terminar, todas las frases recortadas aparecerán listas en la Tabla **04**.
+
+
+================================================================================
+6. SECCIÓN [03]: CÓMO REVISAR LA GRABACIÓN, CORREGIR EL TEXTO Y PROBAR FRASES MAYAS
+================================================================================
+Cada vez que guardas una grabación (o haces clic en el botón de gráfica de una fila
+de la tabla), sus detalles aparecen en la Caja **03** (a la derecha).
+
+6.1 Cómo saber rápido si el audio salió bien (Sin ser técnico)
+--------------------------------------------------------------
+No necesitas entender las gráficas científicas; solo fíjate en estos detalles:
+  - Arriba tienes un reproductor de audio para volver a escuchar el clip cuando quieras.
+  - En los 6 cuadritos de datos:
+    * **Cortes Glotales [ʔ]:** Cuenta cuántos "saltillos" detectó en la voz. Además,
+      debajo de la caja de texto aparecen botoncitos amarillos (ej. `0.65s`); si les
+      das clic, el audio salta directo a ese segundo para que escuches el saltillo.
+    * **HNR / SNR:** El segundo número (**SNR**) indica qué tan silencioso estaba el
+      cuarto. Si el segundo número es **mayor a 15 dB** (por ejemplo `12.4 / 24.0 dB`),
+      significa que hay muy poco ruido de fondo (¡excelente calidad!).
+  - Si grabaste en lengua maya, arriba a la derecha de la Caja **03** verás una
+    etiqueta morada **"Alineación G2P: XX%"** que indica qué tan bien coincidió el
+    sonido grabado con los saltillos y tonos de la frase maya.
+
+6.2 Cómo revisar y corregir la Transcripción (¡PASO MUY IMPORTANTE!)
+--------------------------------------------------------------------
+Para que las grabaciones sirvan después, **lo que está escrito debe coincidir
+exactamente con lo que dijo la persona**.
+
+  1) Mira la caja de texto titulada:
+     **"Transcripción Ortográfica / Modismos Regionales (Faster-Whisper)"**.
+  2) Escucha el audio y lee lo que aparece escrito:
+     - Si la persona grabó una **Frase Trampa en Maya**, el programa protege y pone
+       automáticamente la escritura correcta de 1984 (como `Ma'alob k'iin`).
+     - Si fue **Habla Espontánea** o **Audio Largo**, revisa que no haya cambiado un
+       modismo o palabra maya por otra parecida (ej. que haya puesto *"mar"* en vez
+       de *"mare"*, o que falte un apóstrofo `'`).
+  3) Si necesitas corregir algo:
+     - Haz clic dentro del cuadro de texto y corrígelo con el teclado tal cual lo
+       pronunció la persona.
+     - Asegúrate de que el interruptor **"Validado para exportación TTS"** esté
+       activado (en azul).
+     - Haz clic en el botón celeste **[Guardar Transcripción]**.
+     *(Al guardar, el programa volverá a actualizar automáticamente la pronunciación
+     maya y el análisis gramatical).*
+
+6.3 Cómo usar el "Laboratorio Fonológico G2P Maya 1984 y Glosa Gramatical"
+--------------------------------------------------------------------------
+Debajo del cuadro de transcripción encontrarás una tarjeta especial para la lengua
+maya que puedes usar en cualquier momento (incluso **antes** de grabar):
+
+  1) **Escribir o probar cualquier frase:**
+     En la barra **"Probador G2P..."**, puedes escribir cualquier palabra u oración
+     en maya (por ejemplo: `Ma'alob u sáastal k'iin`) o hacer clic en los botones
+     de **Ejemplos rápidos**.
+     *Nota útil:* Si alguien escribe con ortografía antigua como `Tz'o'ok` o `dz`,
+     el programa la convierte automáticamente a la **Norma Oficial de Agosto de 1984**
+     (`Ts'o'ok`, `ts'`).
+  2) **Entender los colores de pronunciación:**
+     El programa separa la frase en cuadritos de colores para ayudar a leerla:
+       - **Rojo (`Eyectivas C'`):** Consonantes glotalizadas fuertes (`k'`, `ch'`, `ts'`, `p'`, `t'`).
+       - **Verde (`Rearticuladas V'V`):** Vocales cortadas en medio (`a'a`, `o'o`, `e'e`).
+       - **Amarillo (`Cierres Glotales V'`):** Corte de voz al final (`ma'`, `ja'`).
+       - **Morado (`Tono Alto V́V`):** Vocales largas donde sube el tono (`áa`, `ée`, `óo`).
+       - **Azul claro (`Larga Baja VV`):** Vocales largas graves sostenidas (`aa`, `ii`, `oo`).
+       - **Rosa (`Implosiva /ɓ/`):** La `b` suave propia de la lengua maya.
+  3) **Ver el significado palabra por palabra:**
+     Abajo aparecen tarjetas individuales explicando qué significa cada raíz maya y
+     la traducción completa al español (por ejemplo, la diferencia entre saludar con
+     *Ma'alob k'iin*, *Yutsil ja'atskab* o *Ma'alob u sáastal k'iin*).
+  4) **Botón [Usar para Grabar]:**
+     Si escribiste en este probador una frase nueva en maya y quieres que el
+     hablante la grabe ahora mismo, haz clic en **[Usar para Grabar]**: esa frase
+     se pondrá automáticamente arriba en la Caja **01** lista para grabarse.
+
+
+================================================================================
+7. SECCIÓN [04]: TABLA DE GRABACIONES Y CÓMO DESCARGAR EL PAQUETE ZIP
+================================================================================
+
+7.1 Cómo usar la Tabla de Grabaciones (Abajo del todo)
+------------------------------------------------------
+En la Caja **04** aparecen todas las grabaciones guardadas en orden de la más
+reciente a la más antigua:
+
+  - **Buscar y filtrar:** Puedes buscar una palabra en el buscador con lupa, o
+    filtrar para ver solo los audios de **un hablante**, **un idioma** (*Maya Yucateco*,
+    *Español Yucateco* o *Bilingüe*), **una subregión**, o solo los **Validados**.
+  - **Escuchar rápido:** Cada fila tiene su propio mini-reproductor **Play (▶)**.
+  - **Corregir rápido desde la tabla:** Puedes editar el texto directamente en la
+    cajita de la fila y presionar la tecla **[Enter]** (o el botón azul con una
+    palomita **[✓]**) para guardarlo y marcarlo como **Validado**.
+  - **Ver gráficas de un audio anterior:** Haz clic en el botón azul con ícono de
+    gráfica en la columna derecha (*Acciones*) y la pantalla subirá para mostrártelo
+    completo en la Caja **03**.
+  - **Borrar una grabación que no sirva:** Si un clip quedó con ruido o repetido,
+    haz clic en el botón rojo del **bote de basura** de esa fila y confirma. Se
+    borrará únicamente ese clip.
+
+7.2 Cómo Exportar / Descargar las grabaciones listas en un archivo `.zip`
+-------------------------------------------------------------------------
+Cuando terminen de grabar y revisar sus clips, pueden empaquetarlos todos en un
+solo archivo `.zip` listo para entregarse o respaldarse:
+
+  1) Si quieres exportar **TODAS** las grabaciones validadas del sistema, asegúrate
+     de que los filtros de la Caja **04** digan *"Todos los hablantes"*, *"Todos los
+     idiomas"* y *"Todas las subregiones"*.
+     *(Si por el contrario solo quieres un ZIP de una sola persona o solo de Maya,
+     selecciona ese filtro primero).*
+  2) Arriba a la derecha de la Caja **04**, revisa estas 3 opciones:
+     - **Nombre del paquete:** Por defecto dice `accentlab_maya1984_tts` (puedes
+       cambiarlo, por ejemplo a `grabaciones_valladolid_lote1`).
+     - **Lista `Formato:`**
+       * Si no te dieron una instrucción especial, **déjalo en `Formato: Ortografía 1984`**
+         (es el estándar principal).
+       * Solo cámbialo a *Fonemas AFI*, *Tokens Fonéticos TTS* o *Dual* si el
+         encargado técnico te pide específicamente uno de esos formatos.
+     - **Casilla `SNR mín.`:** Puedes dejarla vacía para incluir todos los clips
+       validados, o escribir `15` si quieres que solo exporte los audios con poco
+       ruido de fondo.
+  3) Haz clic en el botón verde **[Exportar Dataset]**.
+  4) Aparecerá una franja verde debajo con tres botones: haz clic en
+     **[Descargar ZIP (...)]** para guardar el paquete comprimido, o revisa también
+     en la carpeta `C:\Users\gersonaam\Documents\VoiceProject\data\exports\`, donde
+     queda guardada automáticamente una copia.
+
+
+================================================================================
+8. CONSEJOS PRÁCTICOS PARA QUE LAS GRABACIONES SALGAN LIMPIAS Y PERFECTAS
+================================================================================
+  1. **Cuida el silencio del cuarto:** Apaga televisores, radios y evita que un
+     ventilador o aire acondicionado sople directamente hacia el micrófono.
+  2. **Distancia ideal al micrófono:** Aproximadamente un palmo o puño abierto
+     (15 a 20 cm) ligeramente de lado a la boca, para que al decir letras fuertes
+     como `p'` o `k'` el aire no golpee la cápsula del micrófono ("popeo").
+  3. **Habla natural, como en casa:** Si la persona lee una frase, pídele que la
+     lea primero con la vista y luego la diga con su entonación cotidiana normal,
+     sin exagerar ni leer silabeando.
+  4. **Deja medio segundo al inicio y al final:** No hables en el mismo instante en
+     que haces clic en *Grabar* ni cortes el botón mientras sigue sonando la última
+     letra; espera medio segundo para que no se coma la primera o última sílaba.
+  5. **Una sola voz por clip:** Evita que otra persona hable, ría o asienta en voz
+     alta mientras el botón esté en *GRABANDO*.
+
+
+================================================================================
+9. SOLUCIÓN RÁPIDA A PROBLEMAS COMUNES (PREGUNTAS FRECUENTES)
+================================================================================
+
+  P1. Hago clic en [Grabar] y me sale un aviso amarillo arriba/abajo diciendo que
+      seleccione un hablante.
+  R:  Falta elegir quién está hablando. Ve arriba a la izquierda (Caja **01**) y
+      selecciona a una persona en la lista *"Hablante Activo"*, o regístrala con
+      **[+ Nuevo Hablante]**.
+
+  P2. El navegador dice "No se pudo acceder al micrófono".
+  R:  1) Revisa que el micrófono esté bien conectado a la computadora.
+      2) Mira en la barra de direcciones arriba en Chrome/Edge (junto a
+         `127.0.0.1:8000`): haz clic en el ícono de ajustes o candado/micrófono y
+         cambia el permiso de Micrófono a **"Permitir"**, luego recarga la página
+         con la tecla `[F5]`.
+
+  P3. La primera grabación del día tardó un poquito más en analizarse que las demás.
+  R:  Es completamente normal. En el primer audio tras encender el programa, el
+      sistema despierta el motor inteligente de reconocimiento de voz; a partir del
+      segundo clip será mucho más rápido.
+
+  P4. Cerré por accidente la pestaña de Chrome/Edge, ¿se borraron las grabaciones?
+  R:  **No se borró nada.** Todas las grabaciones enviadas ya están guardadas en la
+      base de datos de la computadora. Solo vuelve a abrir `http://127.0.0.1:8000`
+      y verás ahí a todos tus hablantes y grabaciones.
+
+  P5. La página `http://127.0.0.1:8000` dice "No se puede acceder a este sitio".
+  R:  Significa que el programa está apagado o se cerró la ventana oscura del Paso 2.
+      Sigue los pasos de la **Sección 2 (Cómo encender el programa)** y vuelve a
+      cargar la página con `[F5]`.
+
+  P6. Hice clic en [Exportar Dataset] y dice que "No existen clips que cumplan los
+      criterios".
+  R:  Revisa dos cosas en la Caja **04**:
+      1) Que tengas al menos un clip con estado **Validado** y con texto escrito
+         (no vacío).
+      2) Que los filtros de hablante/idioma/subregión no estén apuntando a una
+         combinación donde todavía no han grabado nada (ponlos en *"Todos"*).
+
+================================================================================
+                      FIN DEL MANUAL PRÁCTICO DE USUARIO
+================================================================================

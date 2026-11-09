@@ -1,0 +1,719 @@
+================================================================================
+                        DOCUMENTACIÓN TÉCNICA INTEGRAL
+                              ACCENTLAB WEB v2.0
+   Sistema Full-Stack de Recolección, Segmentación Inteligente (Silero VAD),
+     Transcripción Neuronal (Faster-Whisper), Motor Fonológico G2P Maya 1984,
+      Glosador Morfosintáctico Leipzig y Análisis Acústico-Prosódico (Praat)
+                para Construcción de Datasets TTS / VC Regionales
+================================================================================
+
+Versión del Sistema : 2.0.0 (Edición Maya Yucateco 1984 + Español Yucateco)
+Estándar de Audio   : WAV Mono · 24,000 Hz · 16-bit Signed PCM (-1.0 dBFS máx.)
+Enfoque Lingüístico : 1) Lengua Maya Yucateca (`yua`) — Norma Ortográfica de
+                         Agosto de 1984 (G2P determinista + Glosa Leipzig).
+                      2) Español Yucateco (`es_yuc`) — Oriente, Centro, Sur,
+                         Poniente, Costa y Bilingüismo Maya–Español (`yua_es`).
+Compatibilidad TTS  : Coqui TTS / XTTS-v2 / VITS / Piper / LJSpeech / F5-TTS / RVC
+Ruta del Proyecto   : C:\Users\gersonaam\Documents\VoiceProject
+
+
+================================================================================
+ÍNDICE GENERAL
+================================================================================
+  1. Visión General y Objetivos de Ingeniería (v2.0)
+  2. Arquitectura del Sistema y Flujo de Datos Extremo a Extremo
+  3. Estructura Completa de Directorios y Archivos
+  4. Stack Tecnológico, Dependencias y Runtime CUDA/CPU (< 2 GB VRAM)
+  5. Capa de Persistencia, Migración Segura y Esquema SQLite (SQLAlchemy 2.0)
+  6. Motor Lingüístico Maya Yucateco — Norma de Agosto de 1984 (app/linguistics/)
+     6.1 Separación de Responsabilidades: Fonología G2P vs. Acústica Praat
+     6.2 Normalizador Automático hacia la Ortografía de Agosto de 1984
+     6.3 Regla Crítica del Apóstrofo (`'`): 4 Fenómenos sin Pausas Artificiales
+     6.4 Distinción Exacta de los 5 Núcleos Vocálicos y Consonantes Eyectivas/Implosivas
+     6.5 Salidas de `MayaG2P1984`: AFI (IPA), Tokens TTS y Perfil Acústico Esperado
+     6.6 Analizador Morfosintáctico y Pragmático (`MayaGrammaticalAnalyzer` — Leipzig)
+  7. Motor Acústico y Procesamiento Digital de Señales (DSP - Praat & NumPy)
+     7.1 Decodificación Universal Tolerante a Fallos (4 Niveles)
+     7.2 Acondicionamiento de Señal, Eliminación DC y Tope de Ganancia Térmica
+     7.3 Parametrización Fisiológica Adaptativa por Género
+     7.4 Extracción de F0 y Curva del "Cantadito" / Tonos Mayas en Semitonos
+     7.5 Extracción de Formantes Vocálicos (F1/F2) por LPC de Burg
+     7.6 Relación Armónico-Ruido (HNR) y Relación Señal-Ruido (SNR)
+     7.7 Heurística Acústica de Detección de Cortes Glotales / Saltillos [ʔ]
+     7.8 Evaluación de Alineación Fonético-Acústica Maya (`evaluate_maya_phonetic_compliance`)
+  8. Pipeline de Ingesta, Modos de Idioma, Silero VAD y Faster-Whisper ASR
+     8.1 Arquitectura Singleton, Lazy Loading, DLLs CUDA en Windows y VRAM < 2 GB
+     8.2 Soporte `language_mode` (`auto`, `yua`, `es_yuc`) y Protección Ortográfica 1984
+     8.3 Algoritmo de Segmentación Prosódica Inteligente (3.0s a 10.0s)
+     8.4 Recálculo Lingüístico Dinámico, Transaccionalidad y Limpieza Atómica
+  9. Especificación Completa de la API Backend (FastAPI)
+     9.1 Ciclo de Vida, Migración DB al Arranque y Gestión de Archivos en Windows
+     9.2 Catálogo Fonético de las 29 "Frases Trampa" (14 Maya 1984 + 15 Español Yucateco)
+     9.3 Referencia Detallada de Todos los Endpoints HTTP REST
+ 10. Arquitectura del Frontend Web SPA (HTML5 + Bootstrap 5 Dark + JS + Chart.js)
+     10.1 Selector de Idioma de Sesión, Estado Reactivo y Sincronización
+     10.2 Captura Pura DSP con MediaRecorder y Visualizador Web Audio API Canvas
+     10.3 Gráficas Acústicas y Laboratorio Fonológico G2P Maya 1984 en Vivo (Panel 03)
+     10.4 Explorador del Corpus, Filtro por Lengua y Prevención de Bloqueos HTTP
+ 11. Especificación Multiformato de Exportación TTS (`orthographic_1984`, `ipa_phonemes`,
+     `tts_tokens`, `dual_orth_ipa`)
+ 12. Variables de Entorno, Configuración y Comandos de Operación
+ 13. Decisiones de Robustez, Seguridad Operativa y Solución de Problemas
+
+
+================================================================================
+1. VISIÓN GENERAL Y OBJETIVOS DE INGENIERÍA (v2.0)
+================================================================================
+AccentLab Web v2.0 es una estación de trabajo acústico-lingüística y generador de
+corpus de voz construida en Python Full-Stack. Su objetivo central es resolver el
+cuello de botella en la creación de datasets de alta fidelidad fonológica para
+modelos neuronales de Text-to-Speech (TTS) y Voice Conversion (VC) tanto en
+**Lengua Maya Yucateca (`yua`, Norma Ortográfica de Agosto de 1984)** como en
+**Español Yucateco (`es_yuc`)** y habla bilingüe (`yua_es`).
+
+Los pipelines convencionales de recorte, ASR y tokenización TTS fracasan ante la
+lengua maya y el español peninsular por cuatro causas críticas:
+  1) Destrucción del apóstrofo maya (`'`): los tokenizadores estándar eliminan o
+     reemplazan `'` por espacios/pausas, rompiendo palabras y confundiendo
+     consonantes eyectivas (`k'`, `ch'`, `ts'`, `p'`, `t'`), vocales rearticuladas
+     laringalizadas (`ma'alob`, `ts'o'ok`), cierres glotales finales (`ja'`, `ma'`)
+     y ataques glotales morfológicos (`in 'otoch`, `y'éetel`).
+  2) Colapso vocálico y tonal: los sistemas hispanos ignoran la oposición fonémica
+     entre los 5 núcleos vocálicos mayas (`a`, `aa` tono bajo, `áa` tono alto,
+     `a'a` rearticulada y `a'` glotalizada corta) y la implosiva bilabial `/ɓ/`.
+  3) Supresión DSP en navegador: los filtros WebRTC (`noiseSuppression`/`autoGain`)
+     atenúan oclusiones glotales `[ʔ]` (< 20 ms) y distorsionan el HNR.
+  4) Corrupción ASR: `Whisper` sin contexto maya reescribe voces mayas como sílabas
+     arbitrarias en otros alfabetos o castellaniza modismos regionales (`mare`,
+     `boxito`, `xix`, `tuch`, `lo busqué`).
+
+AccentLab Web v2.0 resuelve integralmente estos problemas combinando:
+  - Normalización estricta al Alfabeto Práctico de Agosto de 1984 + motor G2P
+    determinista (`MayaG2P1984`) hacia AFI (IPA) y tokens TTS no ambiguos.
+  - Analizador morfosintáctico e interlineal estilo Leipzig (`MayaGrammaticalAnalyzer`).
+  - Estandarización de señal a WAV Mono 24,000 Hz 16-bit Signed PCM y segmentación
+    prosódica Silero VAD (3–10 s) sin cortar sílabas ni saltillos.
+  - Parametrización física en Praat (`praat-parselmouth`) + evaluación cuantitativa
+    de alineación fonético-acústica (`phonetic_alignment_score` 0–100 %) entre lo
+    pronunciado físicamente y lo esperado por el motor G2P.
+  - Exportación multiformato (`orthographic_1984`, `ipa_phonemes`, `tts_tokens`,
+    `dual_orth_ipa`) lista para `XTTS-v2`, `VITS`, `Piper` y `Coqui TTS`.
+
+
+================================================================================
+2. ARQUITECTURA DEL SISTEMA Y FLUJO DE DATOS EXTREMO A EXTREMO
+================================================================================
+
++------------------------------------------------------------------------------+
+|                       CLIENTE WEB SPA (Navegador Moderno)                    |
+|  - Panel 01: Alta Sociolingüística + Selector de Idioma (`yua`/`es_yuc`/Auto)|
+|              + Carrusel de 29 Frases Trampa (14 Maya 1984 + 15 Español Yuc.) |
+|  - Panel 02: MediaRecorder (Captura Pura DSP) + Osciloscopio/FFT Canvas      |
+|              + Zona Drag & Drop para Entrevistas/Relatos Largos              |
+|  - Panel 03: Chart.js (Curva 30 pts Semitonos + Carta Vocálica F1/F2 Inv.)   |
+|              + Laboratorio Fonológico G2P Maya 1984 y Glosa Leipzig en Vivo  |
+|  - Panel 04: Explorador SQLite + Filtro Lengua + Exportador 4 Formatos TTS   |
++--------------------------------------+---------------------------------------+
+                                       | HTTP / Fetch REST / Multipart Form
+                                       v
++------------------------------------------------------------------------------+
+|                     CAPA API BACKEND — FastAPI (app/main.py)                 |
+|  - Validación Pydantic v2 | Lifespan DB + Safe Migrations | StaticFiles      |
+|  - Endpoint instantáneo `POST /api/linguistics/analyze-maya`                 |
++-------------------+--------------------------------------+-------------------+
+                    |                                      |
+                    v                                      v
++---------------------------------------+  +-----------------------------------+
+| ORQUESTADOR ML/INGESTA (processor.py) |  | MOTOR LINGÜÍSTICO MAYA 1984       |
+| - Singleton Lazy-Loaded (< 2 GB VRAM) |  | (app/linguistics/)                |
+| - Silero VAD (CPU @ 16kHz -> 24kHz)   |  | - `MayaG2P1984`: Normalizador     |
+| - Faster-Whisper (`int8_float16` CUDA |  |   1984, 4 tipos `'`, 5 vocales,   |
+|   / `int8` CPU) con Prompt Maya 1984  |  |   AFI (IPA) y Tokens TTS únicos.  |
+| - Preservación ortográfica validada   |  | - `MayaGrammaticalAnalyzer`:      |
+|   por fonación en modo `trap_phrase`  |  |   Glosa Leipzig, AM, Juego A/B.   |
++-------------------+-------------------+  +-----------------+-----------------+
+                    |                                        |
+                    +-------------------+--------------------+
+                                        v
++------------------------------------------------------------------------------+
+|              MOTOR DSP Y FONÉTICA ACÚSTICA — ProsodyAnalyzer                 |
+|                        (app/analyzers/prosody.py)                            |
+|  1. Decodificador 4 etapas (FFmpeg -> PyAV -> SoundFile/SciPy -> Pydub)      |
+|  2. Normalización WAV 24kHz 16-bit Mono (-DC, pico -1 dBFS, máx. +26 dB)     |
+|  3. Praat Autocorrelación F0 -> Curva 30 puntos en Semitonos (12·log2)       |
+|  4. Praat LPC Burg en núcleos vocálicos -> F1, F2 y carta formántica         |
+|  5. Praat Harmonicity CC -> HNR (dB) + Energía RMS P65/P3 -> SNR (dB)        |
+|  6. Intensidad Praat (paso 2 ms) + Voicing + ZCR < 2800Hz -> Saltillos [ʔ]   |
+|  7. `evaluate_maya_phonetic_compliance` -> Alineación G2P vs. Praat (0–100%) |
++--------------------------------------+---------------------------------------+
+                                       | SQLAlchemy 2.0 ORM (Modo WAL + FK ON)
+                                       v
++------------------------------------------------------------------------------+
+|                 PERSISTENCIA LOCAL (SQLite + Sistema de Archivos)            |
+|  - Base de Datos : data/accentlab.db (`speakers`, `audio_segments`,          |
+|                    `acoustic_metrics` con migración `ALTER TABLE` segura)    |
+|  - Audios WAV    : data/wavs/{SPEAKER_CODE}_{TIMESTAMP}_{UID}.wav            |
+|  - Exportaciones : data/exports/{DATASET}_{TIMESTAMP}/ (4 formatos) + .zip   |
++------------------------------------------------------------------------------+
+
+
+================================================================================
+3. ESTRUCTURA COMPLETA DE DIRECTORIOS Y ARCHIVOS
+================================================================================
+
+VoiceProject/
+├── run.py                              # Punto de entrada Uvicorn configurable
+├── requirements.txt                    # Dependencias Python, DSP, ML y CUDA 12
+├── promt.txt                           # Especificación funcional v2.0 Maya 1984
+├── DOCUMENTACION_TECNICA_ACCENTLAB.txt # Este manual técnico integral (v2.0)
+├── .venv/                              # Entorno virtual aislado (Python 3.13)
+│
+├── app/
+│   ├── __init__.py                     # Versión del paquete (`2.0.0`)
+│   ├── database.py                     # Engine SQLite WAL + migración automática
+│   │                                   # segura `_run_safe_migrations()`
+│   ├── models.py                       # Modelos ORM: Speaker, AudioSegment (con
+│   │                                   # campos G2P/glosa), AcousticMetrics
+│   ├── main.py                         # Aplicación FastAPI v2.0, 29 frases trampa,
+│   │                                   # `/api/linguistics/analyze-maya` y exportador
+│   ├── linguistics/
+│   │   ├── __init__.py                 # Exporta MayaG2P1984 y MayaGrammaticalAnalyzer
+│   │   ├── maya_g2p_1984.py            # Normalizador 1984, clasificador contextual de
+│   │   │                               # apóstrofos (4 tipos), AFI (IPA) y Tokens TTS
+│   │   └── maya_grammar.py             # Analizador morfosintáctico interlineal Leipzig,
+│   │                                   # léxico maya, Juego A/B, AM y notas pragmáticas
+│   ├── analyzers/
+│   │   ├── __init__.py
+│   │   └── prosody.py                  # Motor DSP Praat + NumPy + evaluación de
+│   │                                   # cumplimiento fonético `evaluate_maya_phonetic_compliance`
+│   ├── pipeline/
+│   │   ├── __init__.py
+│   │   └── processor.py                # Singleton Silero VAD + Faster-Whisper +
+│   │                                   # integración `language_mode` y G2P Maya 1984
+│   └── static/
+│       ├── index.html                  # Dashboard SPA v2.0 + Laboratorio G2P Maya
+│       ├── css/
+│       │   └── styles.css              # Tema oscuro + badges fonológicos por color
+│       └── js/
+│           └── app.js                  # Cliente SPA: MediaRecorder, Chart.js,
+│                                       # Probador G2P en Vivo, Glosa y Exportación
+│
+└── data/                               # Creado y migrado automáticamente al iniciar
+    ├── accentlab.db                    # Base de datos relacional SQLite (WAL)
+    ├── raw_uploads/                    # Almacén efímero de subidas crudas
+    ├── wavs/                           # Corpus maestro WAV 24kHz 16-bit Mono
+    └── exports/                        # Paquetes exportados (wavs, CSV, JSON, ZIP)
+
+
+================================================================================
+4. STACK TECNOLÓGICO, DEPENDENCIAS Y RUNTIME CUDA/CPU (< 2 GB VRAM)
+================================================================================
+Definido en `requirements.txt` y validado sobre Python 3.10 a 3.13+:
+
+1. Capa Web y API:
+   - `fastapi>=0.115.0`: Framework ASGI con validación Pydantic v2 y OpenAPI (`/docs`).
+   - `uvicorn[standard]>=0.30.6`: Servidor ASGI de baja latencia.
+   - `python-multipart>=0.0.12`: Recepción de formularios `multipart/form-data`.
+   - `pydantic>=2.9.2`: Esquemas tipados para hablantes, análisis maya y exportación.
+
+2. Capa de Datos y Migración:
+   - `sqlalchemy>=2.0.36`: ORM tipado (`Mapped`, `mapped_column`) + inspector de
+     esquema (`sqlalchemy.inspect`) para migraciones en caliente sin pérdida de datos.
+
+3. Capa Lingüística Computacional (`app/linguistics/`):
+   - Implementada en Python puro de cero dependencias pesadas (`unicodedata`, `re`,
+     `dataclasses`), latencia `< 1 ms` por oración y `0 MB` de consumo de RAM/VRAM.
+
+4. Capa DSP y Decodificación Multimedia:
+   - `numpy>=1.26.4` y `scipy>=1.13.0`: Álgebra de señales, RMS, ZCR y `resample_poly`.
+   - `praat-parselmouth>=0.4.4`: Motor científico Praat en C/C++ (F0 Boersma, LPC Burg,
+     Harmonicity CC e intensidad de alta resolución de `2 ms`).
+   - `soundfile>=0.12.1`, `av>=12.0.0` (`PyAV`), `imageio-ffmpeg>=0.5.1` y
+     `pydub>=0.25.1` + `audioop-lts>=0.2.1; python_version >= "3.13"`.
+
+5. Capa de Machine Learning (VAD + ASR):
+   - `torch>=2.4.0`, `torchaudio>=2.4.0` y `silero-vad>=5.1.2` en CPU (`0 MB` VRAM).
+   - `faster-whisper>=1.1.0` (`CTranslate2`) con `nvidia-cublas-cu12` y
+     `nvidia-cudnn-cu12`: inferencia CUDA `int8_float16` (~450–650 MB VRAM con
+     modelo `small`, `< 2 GB` garantizados) y fallback transparente a CPU `int8`.
+
+
+================================================================================
+5. CAPA DE PERSISTENCIA, MIGRACIÓN SEGURA Y ESQUEMA SQLITE (database.py, models.py)
+================================================================================
+
+5.1 Configuración SQLite y Migración Automática Segura (`app/database.py`)
+--------------------------------------------------------------------------
+- Ubicación por defecto: `data/accentlab.db` (configurable vía `ACCENTLAB_DATABASE_URL`).
+- PRAGMAs aplicados en cada conexión:
+    `PRAGMA foreign_keys = ON;`
+    `PRAGMA journal_mode = WAL;`
+    `PRAGMA synchronous = NORMAL;`
+- Migración sin pérdida de datos (`_run_safe_migrations()` invocada por `init_db()`):
+  Al iniciar la aplicación sobre una base `accentlab.db` creada en v1.0, el sistema
+  inspecciona las columnas reales con `sqlalchemy.inspect(engine)` y ejecuta de forma
+  idempotente `ALTER TABLE ... ADD COLUMN` únicamente para las columnas nuevas de v2.0:
+    * En `audio_segments`: `language_code`, `ipa_phonemes`, `tts_phonetic_tokens`,
+      `grammatical_analysis`.
+    * En `acoustic_metrics`: `phonetic_alignment_score`.
+  Todos los hablantes, grabaciones y métricas previas se preservan intactos.
+
+5.2 Modelo Entidad-Relación v2.0 (`app/models.py`)
+--------------------------------------------------
+Relaciones:
+  Speaker (1) ──────< (N) AudioSegment (1) ────── (1) AcousticMetrics
+          [ON DELETE CASCADE]              [ON DELETE CASCADE]
+
+TABLA 1: `speakers` (Clase `Speaker`)
++------------------+--------------------------+----------------------------------+
+| Columna          | Tipo SQL / Restricciones | Descripción                      |
++------------------+--------------------------+----------------------------------+
+| id               | INTEGER PK AUTOINCREMENT | Identificador interno único.     |
+| speaker_code     | VARCHAR(32) UNIQUE INDEX | Ej. `YUC_ORI_001`.               |
+| name             | VARCHAR(120) NOT NULL    | Nombre o alias del informante.   |
+| gender           | VARCHAR(16) NOT NULL     | `'M'`, `'F'` u `'Otro'`.         |
+| age              | INTEGER NOT NULL         | Edad en años (rango 5–110).      |
+| subregion        | VARCHAR(64) NOT NULL     | `Oriente`, `Centro`, `Sur`,      |
+|                  | DEFAULT 'Centro'         | `Poniente`, `Costa`, `Otro`.     |
+| accent_intensity | VARCHAR(32) NOT NULL     | `Suave`, `Medio` o `Marcado`.    |
+| created_at       | DATETIME(TZ) NOT NULL    | Fecha/hora UTC de registro.      |
++------------------+--------------------------+----------------------------------+
+
+TABLA 2: `audio_segments` (Clase `AudioSegment`)
++----------------------+--------------------------+------------------------------+
+| Columna              | Tipo SQL / Restricciones | Descripción                  |
++----------------------+--------------------------+------------------------------+
+| id                   | INTEGER PK AUTOINCREMENT | ID único del segmento.       |
+| speaker_id           | INTEGER FK NOT NULL INDEX| Ref. `speakers.id` (CASCADE).|
+| filename             | VARCHAR(255) UNIQUE INDEX| Nombre `.wav` en `data/wavs/`|
+| file_path            | VARCHAR(512) NOT NULL    | Ruta relativa POSIX.         |
+| source_type          | VARCHAR(32) NOT NULL     | `'mic'` o `'upload_vad'`.    |
+| prompt_mode          | VARCHAR(32) NOT NULL     | `'trap_phrase'`,             |
+|                      |                          | `'spontaneous'`, `'long_audio'`|
+| prompt_text          | TEXT NULLABLE            | Oración objetivo si aplica.  |
+| duration_sec         | FLOAT NOT NULL           | Duración exacta (s).         |
+| sample_rate          | INTEGER NOT NULL (24000) | 24,000 Hz.                   |
+| orig_start_sec       | FLOAT NULLABLE           | Inicio en audio largo (s).   |
+| orig_end_sec         | FLOAT NULLABLE           | Fin en audio largo (s).      |
+| transcript           | TEXT NOT NULL DEFAULT '' | Texto activo (Norma 1984/ES).|
+| raw_transcript       | TEXT NULLABLE            | Salida cruda de Whisper.     |
+| language_code        | VARCHAR(16) NOT NULL     | [v2.0] `'yua'` (Maya 1984),  |
+|                      | DEFAULT 'es_yuc' INDEX   | `'es_yuc'` o `'yua_es'`.     |
+| ipa_phonemes         | TEXT NULLABLE            | [v2.0] Transcripción AFI     |
+|                      |                          | (ej. `[ma̰ʔaloɓ kʼìːn]`).     |
+| tts_phonetic_tokens  | TEXT NULLABLE            | [v2.0] Secuencia desambiguada|
+|                      |                          | para entrenamiento TTS.      |
+| grammatical_analysis | JSON NULLABLE            | [v2.0] Glosa Leipzig,        |
+|                      |                          | traducción y notas pragmát.  |
+| asr_confidence       | FLOAT NULLABLE           | Confianza ASR `[0, 1]`.      |
+| is_validated         | BOOLEAN NOT NULL         | Curado para exportación TTS. |
+| created_at           | DATETIME(TZ) NOT NULL    | Fecha/hora UTC de creación.  |
++----------------------+--------------------------+------------------------------+
+
+TABLA 3: `acoustic_metrics` (Clase `AcousticMetrics`)
++--------------------------+----------------------+------------------------------+
+| Columna                  | Tipo SQL             | Descripción                  |
++--------------------------+----------------------+------------------------------+
+| id                       | INTEGER PK AUTOINC   | ID interno de métricas.      |
+| segment_id               | INTEGER FK UNIQUE    | Ref. 1:1 `audio_segments.id`.|
+| f0_mean_hz               | FLOAT NOT NULL       | F0 media en tramas sonoras.  |
+| f0_median_hz             | FLOAT NOT NULL       | Mediana F0 (referencia 0 ST).|
+| f0_min_hz / f0_max_hz    | FLOAT NOT NULL       | Percentiles P2 y P98 (Hz).   |
+| f0_semitones_std         | FLOAT NOT NULL       | Desv. estándar en Semitonos. |
+| f0_semitones_range       | FLOAT NOT NULL       | Excursión P95 - P5 (ST).     |
+| f0_curve_semitones       | JSON NOT NULL        | Vector de 30 puntos en ST.   |
+| f1_mean_hz / f2_mean_hz  | FLOAT NOT NULL       | Medias formánticas (Hz).     |
+| vowel_space_points       | JSON NOT NULL        | Hasta 35 puntos `{t,f1,f2}`. |
+| hnr_db / snr_db          | FLOAT NOT NULL       | Armónico-Ruido y Señal-Ruido.|
+| voiced_fraction          | FLOAT NOT NULL       | Fracción sonora `F0 > 0`.    |
+| glottal_stops_count      | INTEGER NOT NULL     | Saltillos físicos `[ʔ]`.     |
+| glottal_stop_timestamps  | JSON NOT NULL        | Segundos exactos de `[ʔ]`.   |
+| phonetic_alignment_score | FLOAT NOT NULL       | [v2.0] Cumplimiento acústico |
+|                          | DEFAULT 0.0          | G2P vs. Praat (`0.0–100.0`). |
+| created_at               | DATETIME(TZ) NOT NULL| Timestamp UTC de análisis.   |
++--------------------------+----------------------+------------------------------+
+
+
+================================================================================
+6. MOTOR LINGÜÍSTICO MAYA YUCATECO — NORMA DE AGOSTO DE 1984 (app/linguistics/)
+================================================================================
+
+6.1 Separación de Responsabilidades: G2P vs. Modelo Acústico
+------------------------------------------------------------
+- `app/linguistics/maya_g2p_1984.py` define **cómo se estructura fonológicamente**
+  el enunciado escrito según el Alfabeto Práctico de Agosto de 1984.
+- `app/analyzers/prosody.py` mide **cómo suena físicamente** la grabación (F0,
+  formantes, HNR y saltillos `[ʔ]`) y cuantifica qué tan fielmente la realización
+  acústica del hablante cumple el perfil fonológico predicho por el G2P.
+
+6.2 Normalizador Automático a la Norma de Agosto de 1984 (`normalize_orthography_1984`)
+---------------------------------------------------------------------------------------
+1. Normaliza cadenas Unicode a `NFC` (asegurando vocales tónicas precompuestas
+   `á, é, í, ó, ú`).
+2. Unifica variantes tipográficas de apóstrofo (`’`, `‘`, `ʼ`, `ʾ`, `` ` ``, `´`)
+   al apóstrofo recto estándar `'` ASCII **sin sustituirlos jamás por espacios**.
+3. Convierte automáticamente grafías coloniales o pre-1984 en voces mayas:
+   - `tz'` y `dz` -> `ts'` (ej. `Tz'o'ok` -> `Ts'o'ok`, `dzan` -> `ts'an`)
+   - `tz`         -> `ts`  (ej. `utz` -> `uts`)
+   - `c'`         -> `k'`  (ej. `c'iin` -> `k'iin`)
+   - `c` velar ante `a/o/u` o posición final en raíces mayas -> `k`, preservando
+     intactos préstamos del español mediante diccionario de excepciones (`Dios`,
+     `como`, `mercado`, `camión`, `cuando`, etc.).
+
+6.3 Regla Crítica del Apóstrofo (`'`): Clasificación Contextual en 4 Tipos
+--------------------------------------------------------------------------
+**PROHIBIDO reemplazar apóstrofos por espacios o pausas.** El parser de máxima
+coincidencia izquierda-derecha (`MayaG2P1984.phonemize_word`) desambigua cada `'`
+con precedencia estricta en 4 fenómenos fonológicos distintos:
+
+  - `TYPE_1_EJECTIVE` — Consonante Glotalizada / Eyectiva (`C'`):
+    Dígrafos y trígrafos indivisibles `ts'`, `ch'`, `k'`, `p'`, `t'` -> fonemas
+    `/tsʼ, tʃʼ, kʼ, pʼ, tʼ/` -> tokens TTS `ts_ej, ch_ej, k_ej, p_ej, t_ej`.
+  - `TYPE_2_REARTICULATED` — Vocal Rearticulada / Laringalizada (`V₁'V₁`, `V́₁'V₁`, `V₁'V́₁`):
+    Misma vocal base a ambos lados del apóstrofo (ej. `ma'alob`, `ja'atskab`,
+    `k'a'ana'an`, `ts'o'ok`) -> unidad nuclear única `/a̰ʔa, ḛʔe, ḭʔi, o̰ʔo, ṵʔu/`
+    -> tokens TTS `a_reart, e_reart, i_reart, o_reart, u_reart`.
+  - `TYPE_3_CODA_GLOTTAL` — Cierre Glotal Posvocálico / Final (`V'`):
+    Vocal seguida de `'` ante consonante, vocal heterorgánica o fin de palabra
+    (ej. `ma'`, `ja'`, `sa'`, `te'elo'`) -> `/aʔ, eʔ, iʔ, oʔ, uʔ/` -> tokens TTS
+    `a_glot, e_glot, i_glot, o_glot, u_glot`.
+  - `TYPE_4_BOUNDARY_GLOTTAL` — Ataque Glotal Prevocálico o Frontera Morfológica:
+    Apóstrofo inicial `'V` (ej. `in 'otoch`) o tras consonante no eyectivable `C'V`
+    (ej. `y'éetel`) -> oclusiva glotal explícita `/ʔ/` -> token TTS `glot_ons`.
+
+6.4 Los 5 Núcleos Vocálicos Mayas y Consonantes Especiales (Norma 1984)
+-----------------------------------------------------------------------
+  1. Vocal corta (`a, e, i, o, u`)                -> `/a, e, i, o, u/` (`a, e, i, o, u`)
+  2. Vocal larga tono bajo (`aa, ee, ii, oo, uu`) -> `/àː, èː, ìː, òː, ùː/` (`aa_low`...)
+  3. Vocal larga tono alto (`áa, ée, íi, óo, úu`) -> `/áː, éː, íː, óː, úː/` (`aa_high`...)
+  4. Vocal rearticulada (`a'a, e'e, i'i, o'o, u'u`)-> `/a̰ʔa, ḛʔe, ḭʔi, o̰ʔo, ṵʔu/` (`a_reart`...)
+  5. Vocal glotalizada corta (`a', e', i', o', u'`)-> `/aʔ, eʔ, iʔ, oʔ, uʔ/` (`a_glot`...)
+
+  Consonantes específicas de 1984:
+  - `b`  -> implosiva bilabial sonora `/ɓ/` (`b_imp`)
+  - `x`  -> fricativa postalveolar sorda `/ʃ/` (`x_sh`)
+  - `j`  -> fricativa glotal sorda `/h/` (`j_h`)
+  - `ts` -> africada alveolar simple `/ts/` (`ts`)
+  - `ch` -> africada postalveolar simple `/tʃ/` (`ch`)
+
+6.5 Salida Estructurada de `MayaG2PResult`
+------------------------------------------
+Ejemplo sobre `"Ma'alob k'iin"`:
+  - `normalized_1984`       : `"Ma'alob k'iin"`
+  - `ipa_transcription`     : `"[ma̰ʔaloɓ kʼìːn]"`
+  - `tts_phonetic_tokens`   : `"m a_reart l o b_imp | k_ej ii_low n"`
+  - `Spanish_Approx_Readout`: `"ma·ʔalob kʼiin"`
+  - `expected_acoustic_profile`: conteo exacto de `expected_glottal_events`,
+    `expected_vocalic_glottal_drops`, `rearticulated_vowels`, `glottalized_vowels`,
+    `ejective_consonants`, `implosive_consonants`, `high_tone_syllables`,
+    `low_tone_long_vowels`, `apostrophe_breakdown` y lista token por token.
+
+6.6 Analizador Morfosintáctico y Semántico (`MayaGrammaticalAnalyzer`)
+----------------------------------------------------------------------
+Ubicado en `app/linguistics/maya_grammar.py`:
+  - Detecta automáticamente el código de lengua: `'yua'` (Maya Yucateco),
+    `'es_yuc'` (Español Yucateco) o `'yua_es'` (Bilingüe / Code-Switching).
+  - Modela los paradigmas morfológicos centrales del maya yucateco:
+    * Marcadores de Aspecto-Modo (AM): `k-` / `ku` / `ka` (incompletivo), `t-` / `tu`
+      (completivo), `táan` (progresivo), `ts'o'ok` (terminativo), `yan` (obligativo),
+      `taak` (desiderativo), `ko'ox` (exhortativo), `je'el ...-e'` (aseverativo).
+    * Pronombres Ergativos / Posesivos (Juego A): `in / inw` (`1SG.ERG`),
+      `a / aw` (`2SG.ERG`), `u / uy` (`3SG.ERG`), `k` (`1PL.ERG`) con detección de
+      prefijos epentéticos `w-` / `y-` ante raíces de inicio vocálico (`wotoch`, `wóol`).
+    * Sufijos Absolutivos y Clíticos (Juego B / Deícticos): `-en` (`1SG.ABS`),
+      `-ech` (`2SG.ABS`), `-o'on` (`1PL.ABS`), `-e'ex` (`2PL`), `-o'ob` (`3PL`),
+      más marcos discontinuos `le ...-o'` (distal), `le ...-a'` (proximal) y `-e'` (tópico).
+  - Incluye análisis canónico y contraste pragmático detallado de saludos y
+    expresiones frecuentes, tales como:
+      * `Ma'alob k'iin` -> saludo diurno estándar (*"Buenos días / Buen día"*).
+      * `Yutsil ja'atskab` -> saludo matutino tradicional (*"Buena mañana"*).
+      * `Ma'alob u sáastal k'iin` -> saludo descriptivo/augural (*"Que amanezca bien el día"*).
+      * `Bix a beel`, `Toj in wóol`, `Dios bo'otik`, `Nib óolal`, `Ba'ax ka wa'alik`,
+        `Tu'ux ka bin`, entre otros.
+
+
+================================================================================
+7. MOTOR ACÚSTICO Y PROCESAMIENTO DIGITAL DE SEÑALES (app/analyzers/prosody.py)
+================================================================================
+Clase principal: `ProsodyAnalyzer` · Salida: `@dataclass ProsodyAnalysisResult`
+
+7.1 Decodificación Universal Tolerante a Fallos (`_decode_any_audio_to_mono_24k`)
+---------------------------------------------------------------------------------
+Cascada de 4 niveles para decodificar `WebM/Opus`, `MP3`, `WAV`, `OGG`, `M4A`, `FLAC`:
+  1. FFmpeg CLI directo (del `PATH` o portable de `imageio-ffmpeg`) hacia WAV temporal
+     único (`accentlab_dec_{uuid4}.wav`) eliminado en bloque `finally`.
+  2. PyAV (`av.AudioResampler` a `mono`, `24000 Hz`).
+  3. `soundfile` + `scipy.signal.resample_poly` libre de aliasing.
+  4. `pydub` como respaldo final.
+
+7.2 Acondicionamiento de Señal (`save_mono_24k_pcm16`)
+------------------------------------------------------
+Elimina DC offset (`mono - mean(mono)`), normaliza pico a `-1.0 dBFS` con tope
+máximo de ganancia de `20.0x` (`+26 dB`) para no amplificar ruido térmico en
+grabaciones silenciosas, y escribe `WAV` Mono `24,000 Hz` `PCM_16`.
+
+7.3 Parametrización Fisiológica por Género (`analyze_wav`)
+----------------------------------------------------------
+  - `'M'`    : `pitch_floor = 65 Hz`,  `pitch_ceiling = 300 Hz`, `max_formant = 5000 Hz`
+  - `'F'`    : `pitch_floor = 100 Hz`, `pitch_ceiling = 500 Hz`, `max_formant = 5500 Hz`
+  - `'Otro'` : `pitch_floor = 75 Hz`,  `pitch_ceiling = 450 Hz`, `max_formant = 5250 Hz`
+
+7.4 F0 y Contorno Normalizado de 30 Puntos en Semitonos (`_extract_pitch_and_semitones`)
+----------------------------------------------------------------------------------------
+Extrae F0 por autocorrelación de Boersma (`snd.to_pitch_ac`), descarta saltos de
+octava aislados (`> 10 ST`), convierte a semitonos respecto a la mediana del
+enunciado (`ST(t) = 12 * log2(F0(t) / F0_mediana)`) e interpola una curva suave
+de `30` puntos equiespaciados para capturar tanto el "cantadito" circunflejo
+hispano como las cimas de vocales largas de tono alto (`V́V`) del maya yucateco.
+
+7.5 Formantes F1/F2 (`_extract_formants`) y 7.6 Calidad HNR/SNR (`_extract_hnr_and_snr`)
+----------------------------------------------------------------------------------------
+- LPC de Burg (`5.0` formantes, ventana `25 ms`) filtrado exclusivamente sobre
+  núcleos vocálicos sonoros de alta energía (`200<=F1<=1100 Hz`, `700<=F2<=3200 Hz`).
+- `HNR` por correlación cruzada en Praat (útil además como correlato acústico de
+  voz laringalizada/*creaky voice* en vocales rearticuladas mayas `V'V`) y `SNR`
+  por razón energética percentil 65 vs. percentil 3 (`0–60 dB`).
+
+7.7 Detección Acústica de Cortes Glotales / Saltillos `[ʔ]` (`_detect_glottal_stops`)
+-------------------------------------------------------------------------------------
+Analiza intensidad Praat con paso de `2 ms` (`minimum_pitch=200 Hz`), detectando
+caídas abruptas `>= 10.5 dB` en `<= 18 ms` precedidas de vibración glotal (`F0 > 0`),
+con filtro anti-fricativas (`ZCR <= 2800 Hz`) y confirmación intervocálica o
+prepausal abrupta, aplicando periodo refractario de `120 ms`.
+
+7.8 Evaluación de Alineación Fonético-Acústica Maya (`evaluate_maya_phonetic_compliance`)
+-----------------------------------------------------------------------------------------
+Pondera en una escala de `0.0` a `100.0` (`phonetic_alignment_score`) qué tan bien
+la señal física grabada en Praat realiza los rasgos exigidos por `MayaG2PResult`:
+  1. Sub-puntaje de Glotalización (`45 %`): compara `glottal_stops_count` y la
+     textura laringalizada (`hnr_db` moderado `6–18 dB` en vocales rearticuladas
+     `V'V`) contra `expected_vocalic_glottal_drops` y `ejective_consonants`.
+  2. Sub-puntaje Tonal (`35 %`): si existen sílabas `V́V` (`high_tone_syllables > 0`),
+     verifica que la curva en semitonos exhiba excursión positiva (`max(ST) >= +1.5 ST`
+     y `f0_semitones_std >= 1.4 ST`); si todas las vocales son bajas/cortas, premia
+     la estabilidad tonal controlada.
+  3. Sub-puntaje de Fonación y Calidad (`20 %`): evalúa `voiced_fraction` y `snr_db`
+     para garantizar articulación plena y limpia.
+
+
+================================================================================
+8. PIPELINE DE INGESTA, MODOS DE IDIOMA, SILERO VAD Y FASTER-WHISPER (processor.py)
+================================================================================
+
+8.1 Lazy Loading, DLLs CUDA en Windows y Límite de VRAM < 2 GB
+--------------------------------------------------------------
+- `_register_windows_torch_cuda_dlls()` registra automáticamente `nvidia/*/bin` y
+  `torch/lib` con `os.add_dll_directory()` reteniendo referencias en `_DLL_DIR_HANDLES`.
+- `WhisperModel` corre en `cuda` (`int8_float16`, ~500 MB VRAM en `small`) con
+  fallback automático a `cpu` (`int8`) ante ausencia de GPU o error de librerías.
+- `Silero VAD` corre íntegramente en CPU (`0 MB` VRAM).
+
+8.2 Soporte `language_mode` (`auto`, `yua`, `es_yuc`) y Protección Maya 1984
+----------------------------------------------------------------------------
+`process_single_clip` y `process_long_audio` aceptan `language_mode`:
+  1. Selección inteligente de `initial_prompt` para `faster-whisper`:
+     - Si `language_mode == "yua"` o si `prompt_text` es detectado como maya por
+       `MayaGrammaticalAnalyzer`, Whisper recibe `DEFAULT_MAYA_1984_PROMPT`
+       (`"Ma'alob k'iin, Yutsil ja'atskab, Ma'alob u sáastal k'iin, Bix a beel, Toj in wóol..."`),
+       manteniendo decodificación en alfabeto latino sin alucinar otros sistemas de escritura.
+     - En español regional (`es_yuc`), recibe `DEFAULT_REGIONAL_PROMPT` con léxico yucateco.
+  2. Protección de ortografía 1984 en modo `trap_phrase` (`_resolve_segment_linguistics`):
+     Cuando el hablante lee una oración maya conocida del catálogo (o del Probador
+     G2P en Vivo) y Praat/Whisper confirman fonación humana válida (`voiced_fraction >= 0.05`),
+     el sistema preserva en `transcript` la ortografía exacta normalizada de Agosto
+     de 1984 mientras conserva la salida literal de Whisper en `raw_transcript` para
+     trazabilidad científica.
+  3. Ejecución automática de `MayaG2P1984`, `MayaGrammaticalAnalyzer` y
+     `evaluate_maya_phonetic_compliance` en cada clip ingerido.
+
+8.3 Segmentación Inteligente (3–10 s) y 8.4 Recálculo Dinámico
+--------------------------------------------------------------
+- `detect_smart_segments`: recorta grabaciones largas en clips de `3.0` a `10.0 s`
+  respetando pausas mayores a `280 ms` (para no partir oclusivas ni saltillos `[ʔ]`),
+  buscando valles RMS inter-léxicos cuando hay monólogos continuos y aplicando fade
+  de `10 ms`.
+- `recompute_segment_linguistics(segment)`: invocado automáticamente cuando el
+  usuario edita una transcripción en `PUT /api/segments/{id}/transcript`, volviendo
+  a normalizar a 1984 (si es maya) y recalculando AFI, tokens TTS, glosa Leipzig y
+  `phonetic_alignment_score` sin necesidad de re-procesar el archivo WAV.
+
+
+================================================================================
+9. ESPECIFICACIÓN COMPLETA DE LA API BACKEND (app/main.py)
+================================================================================
+
+9.1 Ciclo de Vida y Resiliencia en Windows
+------------------------------------------
+- `lifespan` ejecuta `init_db()` (creación de tablas + migración segura v2.0).
+- `_safe_unlink_file` previene errores `WinError 32` en Windows al borrar `.wav`.
+
+9.2 Catálogo Ampliado de 29 "Frases Trampa" (`TRAP_PHRASES`)
+------------------------------------------------------------
+A) **14 Oraciones en Lengua Maya Yucateca (`language: "yua"`, Norma Agosto 1984)**
+   organizadas en 4 categorías fonológicas:
+   1. *Maya 1984 — Saludos y Variantes Pragmáticas*:
+      - `MAYA_SAL_01`: `"Ma'alob k'iin"`
+      - `MAYA_SAL_02`: `"Yutsil ja'atskab"`
+      - `MAYA_SAL_03`: `"Ma'alob u sáastal k'iin"`
+      - `MAYA_SAL_04`: `"¿Bix a beel? Toj in wóol, Dios bo'otik."`
+   2. *Maya 1984 — Vocales Rearticuladas [V'V]*:
+      - `MAYA_REART_01`: `"Jach k'a'ana'an in kanik maaya t'aan sáansamal."`
+      - `MAYA_REART_02`: `"Ts'o'ok in janal bu'ul yéetel waaj ichil in wotoch."`
+      - `MAYA_REART_03`: `"¿Ba'ax ka wa'alik? Ko'ox xíimbal te'elo'."`
+   3. *Maya 1984 — Consonantes Eyectivas [C']*:
+      - `MAYA_EJEC_01`: `"Le ch'íich'o' táan u k'aay yóok'ol le k'áak'o'."`
+      - `MAYA_EJEC_02`: `"Taak in ts'íibtik u k'aaba' in kaajal ich maaya t'aan."`
+      - `MAYA_EJEC_03`: `"P'o' a k'ab táanil ti' a janal yéetel a láak'o'ob."`
+   4. *Maya 1984 — Contraste Tonal [V́V vs VV]*:
+      - `MAYA_TON_01`: `"Sáansamal ku sáastal ma'alob k'iin tu kool in yuum."`
+      - `MAYA_TON_02`: `"Ma'alob áak'ab, táan u taal síis iik' te' kaajo'."`
+      - `MAYA_TON_03`: `"In peek' yéetel in miis táan u wenelo'ob tu jáal le bejo'."`
+      - `MAYA_TON_04`: `"¿Tu'ux ka bin bejla'e'? Yan in bin meyaj ich kool."`
+
+B) **15 Oraciones en Español Yucateco y Contraste Pan-Mexicano (`language: "es_yuc"`)**:
+   `YUC_GLOT_01..03`, `YUC_CANT_01..04`, `YUC_NAS_01..03`, `YUC_MOD_01..04` y `MEX_GEN_01`.
+
+9.3 Referencia de Endpoints HTTP REST (v2.0)
+--------------------------------------------
+  1) `GET  /`                                -> Sirve la SPA (`app/static/index.html`).
+  2) `GET  /api/prompts`                     -> Filtros opcionales `?language=yua|es_yuc` y `?category=...`.
+  3) `POST /api/linguistics/analyze-maya`    -> **[Nuevo v2.0]** Recibe `{ "text": str }` y retorna al instante
+                                                normalización 1984, AFI, tokens TTS, desglose de apóstrofos
+                                                (`TYPE_1..TYPE_4`), glosa morfosintáctica Leipzig y traducción.
+  4) `GET  /api/speakers`                    -> Lista hablantes con conteo y duración acumulada.
+  5) `POST /api/speakers`                    -> Registra hablante y autogenera `speaker_code`.
+  6) `DELETE /api/speakers/{speaker_id}`     -> Borra hablante, registros en cascada y `.wav` en disco.
+  7) `GET  /api/stats`                       -> KPIs globales + `maya_segments`, `spanish_segments`,
+                                                `avg_phonetic_alignment_score` y desglose `by_subregion`.
+  8) `POST /api/record-clip`                 -> Multipart (`speaker_id`, `prompt_mode`, `prompt_text`,
+                                                `language_mode`, `audio`). Normaliza, mide en Praat,
+                                                transcribe, ejecuta G2P + Glosa y guarda en SQLite.
+  9) `POST /api/upload-long-audio`           -> Multipart (`speaker_id`, `min_duration_sec`, `max_duration_sec`,
+                                                `pad_ms`, `language_mode`, `audio`). Segmenta con Silero VAD
+                                                y analiza cada clip con Praat + Whisper + G2P Maya 1984.
+ 10) `GET  /api/segments`                    -> Filtros `?speaker_id`, `?subregion`, `?language_code`,
+                                                `?validated_only` y `?search` (busca también en `ipa_phonemes`).
+ 11) `GET  /api/segments/{segment_id}`       -> Detalle completo de un segmento individual.
+ 12) `PUT  /api/segments/{segment_id}/transcript` -> Actualiza transcripción y recalcula G2P + Glosa +
+                                                     alineación acústica Praat automáticamente.
+ 13) `DELETE /api/segments/{segment_id}`     -> Elimina fila SQLite y archivo `.wav` físico.
+ 14) `POST /api/export-dataset`              -> Exporta corpus filtrado con selector `text_format` y `language_code`.
+
+
+================================================================================
+10. ARQUITECTURA DEL FRONTEND WEB SPA (app/static/)
+================================================================================
+
+10.1 Selector de Idioma de Sesión (Panel 01)
+--------------------------------------------
+Permite alternar en tiempo real entre:
+  - `Detección Automática (Maya 1984 / Español)` (`auto`)
+  - `Maya Yucateco — Norma de Agosto de 1984 (yua)` (`yua`)
+  - `Español Yucateco / Regional (es_yuc)` (`es_yuc`)
+Al cambiar de modo, el carrusel de frases y el selector de categorías se filtran
+automáticamente y el valor `language_mode` se adjunta en cada grabación o subida VAD.
+
+10.2 Captura Pura DSP y Osciloscopio/FFT en Vivo (Panel 02)
+-----------------------------------------------------------
+Mantiene `echoCancellation: false`, `noiseSuppression: false`, `autoGainControl: false`
+para preservar saltillos `[ʔ]`, consonantes eyectivas `C'` y vocales laringalizadas `V'V`.
+
+10.3 Laboratorio Fonológico G2P Maya 1984 y Glosa Gramatical (Panel 03)
+-----------------------------------------------------------------------
+Integrado junto a las gráficas de contorno en Semitonos y carta formántica F1/F2:
+  - **Probador G2P en Vivo (`#liveG2pInput`)** con debounce de `240 ms`, botones de
+    frases de prueba rápida (*Ma'alob k'iin*, *Yutsil ja'atskab*, *Ma'alob u sáastal k'iin*,
+    grafía pre-1984 *Tz'o'ok in janal*) y botón **"Usar para Grabar"** que envía la
+    frase normalizada en 1984 directamente al Panel 01 como guion activo.
+  - ** Chips Fonológicos AFI (IPA) y Tokens TTS con Código de Colores**:
+      * Rojo coral (`.phon-ejective`)  -> Consonantes eyectivas `C'` (`/kʼ, tʃʼ, tsʼ, pʼ, tʼ/`)
+      * Verde esmeralda (`.phon-reart`)-> Vocales rearticuladas `V'V` (`/V̰ʔV/`)
+      * Ámbar (`.phon-glottal`)        -> Cierres y ataques glotales `V'` / `'V` (`/ʔ/`)
+      * Violeta (`.phon-hightone`)     -> Vocales largas con tono alto `V́V` (`/V́ː/`)
+      * Cian (`.phon-lowlong`)         -> Vocales largas con tono bajo `VV` (`/V̀ː/`)
+      * Rosa (`.phon-implosive`)       -> Implosiva bilabial `/ɓ/` (`b_imp`)
+  - **Contadores Contextuales de Apóstrofos**: desglose explícito Tipo 1 (`C'`),
+    Tipo 2 (`V'V`), Tipo 3 (`V'`), Tipo 4 (`'V`) y sílabas tonales.
+  - **Tarjetas de Glosa Interlineal Leipzig**: superficie en 1984, categoría léxica,
+    segmentación morfémica, glosa gramatical, significado en español, traducción
+    semántica oracional, notas pragmáticas y variantes equivalentes.
+
+10.4 Explorador del Corpus y Exportación Multiformato (Panel 04)
+----------------------------------------------------------------
+Cada fila muestra píldora de lengua (`MAYA 1984`, `ES YUC`, `YUA+ES`), transcripción
+editable, línea AFI (`ipa_phonemes`) y porcentaje de cumplimiento acústico
+(`G2P XX%`), con filtro dedicado por lengua y selector de formato `metadata.csv`.
+
+
+================================================================================
+11. ESPECIFICACIÓN MULTIFORMATO DE EXPORTACIÓN TTS (XTTS / VITS / PIPER / COQUI)
+================================================================================
+`POST /api/export-dataset` genera `data/exports/{dataset}_{YYYYMMDD_HHMMSS}/` y `.zip`
+soportando 4 formatos de texto en `metadata.csv` (codificación UTF-8, sin cabecera):
+
+1) `"orthographic_1984"` (Ortografía Maya Agosto 1984 / Español limpio — ideal XTTS-v2):
+     wavs/clip.wav|Ma'alob k'iin|YUC_ORI_001
+
+2) `"ipa_phonemes"` ( Alfabeto Fonético Internacional puro sin corchetes — ideal VITS/IPA):
+     wavs/clip.wav|ma̰ʔaloɓ kʼìːn|YUC_ORI_001
+
+3) `"tts_tokens"` (Tokens fonéticos desambiguados — ideal vocabularios custom Piper/VITS):
+     wavs/clip.wav|m a_reart l o b_imp | k_ej ii_low n|YUC_ORI_001
+
+4) `"dual_orth_ipa"` (4 columnas con ortografía 1984 + AFI en paralelo):
+     wavs/clip.wav|Ma'alob k'iin|ma̰ʔaloɓ kʼìːn|YUC_ORI_001
+
+En los 4 modos, `manifest.json` almacena simultáneamente `language_code`, `text`,
+`text_orthographic_1984`, `ipa_phonemes`, `tts_phonetic_tokens`, `grammatical_analysis`,
+`speaker` y `metrics` (incluyendo `phonetic_alignment_score`).
+
+
+================================================================================
+12. VARIABLES DE ENTORNO, CONFIGURACIÓN Y COMANDOS DE OPERACIÓN
+================================================================================
+
++--------------------------------+----------------------+------------------------+
+| Variable                       | Valor por Defecto    | Descripción            |
++--------------------------------+----------------------+------------------------+
+| ACCENTLAB_HOST                 | 127.0.0.1            | IP de escucha Uvicorn. |
+| ACCENTLAB_PORT                 | 8000                 | Puerto HTTP.           |
+| ACCENTLAB_RELOAD               | 1                    | Hot-reload (`1` o `0`).|
+| ACCENTLAB_DATABASE_URL         | sqlite:///.../data/  | URL SQLAlchemy SQLite. |
+|                                | accentlab.db         |                        |
+| ACCENTLAB_WHISPER_MODEL        | small                | `tiny`, `base`, `small`|
+|                                |                      | `medium`, etc.         |
+| ACCENTLAB_DEVICE               | auto                 | `auto`, `cuda` o `cpu`.|
+| ACCENTLAB_INITIAL_PROMPT       | (Prompt Español Yuc.)| Prompt ASR p/ `es_yuc`.|
+| ACCENTLAB_MAYA_INITIAL_PROMPT  | (Prompt Maya 1984)   | Prompt ASR p/ `yua`.   |
++--------------------------------+----------------------+------------------------+
+
+Ejecución en Windows PowerShell:
+  cd C:\Users\gersonaam\Documents\VoiceProject
+  .\.venv\Scripts\python.exe run.py
+
+Accesos locales:
+  - Estación Web SPA (v2.0) : http://127.0.0.1:8000
+  - Documentación OpenAPI   : http://127.0.0.1:8000/docs
+
+
+================================================================================
+13. DECISIONES DE ROBUSTEZ, SEGURIDAD OPERATIVA Y SOLUCIÓN DE PROBLEMAS
+================================================================================
+1. Integridad Fonológica para Entrenamiento TTS Maya (`yua`):
+   - Para entrenadores basados en grafemas (`XTTS-v2`, `F5-TTS`), usa `orthographic_1984`
+     para garantizar que nunca coexistan grafías coloniales (`dz`, `tz'`) con la
+     Norma de Agosto de 1984 (`ts'`, `ts`, `k'`).
+   - Para entrenadores fonémicos desde cero (`VITS`, `Piper`, `Matcha-TTS`), usa
+     `tts_tokens` o `ipa_phonemes`, donde las vocales rearticuladas (`a_reart`),
+     tonos altos (`aa_high`) y eyectivas (`k_ej`) poseen símbolos atómicos únicos.
+2. Contexto Seguro de Micrófono:
+   - Los navegadores habilitan `getUserMedia` en `http://127.0.0.1`, `http://localhost`
+     o `HTTPS`. Para capturar hablantes en trabajo de campo desde celulares por Wi-Fi
+     local, expón el puerto detrás de un proxy/túnel HTTPS.
+3. Respaldo SQLite en Modo WAL:
+   - Cierra Uvicorn antes de copiar `data/accentlab.db` (o respalda conjuntamente
+     `accentlab.db`, `accentlab.db-wal` y `accentlab.db-shm`).
+
+================================================================================
+                    FIN DE LA DOCUMENTACIÓN TÉCNICA INTEGRAL (v2.0)
+================================================================================

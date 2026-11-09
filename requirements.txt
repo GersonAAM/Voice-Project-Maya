@@ -1,0 +1,33 @@
+# ==============================================================================
+# AccentLab Web - Dependencias del Sistema Full-Stack (Python 3.10+)
+# ==============================================================================
+
+# --- Backend API & Servidor ASGI ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.6
+python-multipart>=0.0.12
+pydantic>=2.9.2
+
+# --- Persistencia ORM (SQLAlchemy 2.0 + SQLite) ---
+sqlalchemy>=2.0.36
+
+# --- Procesamiento de Señales de Audio (DSP) & Fonética Acústica ---
+numpy>=1.26.4
+scipy>=1.13.0
+praat-parselmouth>=0.4.4
+soundfile>=0.12.1
+pydub>=0.25.1
+# Requerido para pydub en Python 3.13+ donde 'audioop' salió de la stdlib:
+audioop-lts>=0.2.1; python_version >= "3.13"
+# Binario portable de FFmpeg de respaldo en caso de no estar en el PATH del SO:
+imageio-ffmpeg>=0.5.1
+av>=12.0.0
+
+# --- Machine Learning: Segmentación de Voz (VAD) & Transcripción (ASR) ---
+torch>=2.4.0
+torchaudio>=2.4.0
+silero-vad>=5.1.2
+faster-whisper>=1.1.0
+# Librerías runtime CUDA 12 para acelerar CTranslate2 (faster-whisper) en GPUs NVIDIA (<2GB VRAM):
+nvidia-cublas-cu12; platform_system == "Windows" or platform_system == "Linux"
+nvidia-cudnn-cu12; platform_system == "Windows" or platform_system == "Linux"

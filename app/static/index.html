@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AccentLab Web — Laboratorio Acústico &amp; Corpus Builder TTS/VC</title>
+
+  <!-- Tipografías Técnicas (Inter + JetBrains Mono) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Bootstrap 5.3 + Bootstrap Icons -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    rel="stylesheet"
+  />
+
+  <!-- Hoja de estilos de estudio acústico -->
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <!-- =====================================================================
+       BARRA SUPERIOR E INDICADORES GLOBALES DEL CORPUS
+       ===================================================================== -->
+  <header class="navbar-studio sticky-top border-bottom">
+    <div class="container-fluid px-3 px-xl-4 py-2">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <!-- Identidad -->
+        <div class="d-flex align-items-center gap-3">
+          <div class="brand-badge">
+            <i class="bi bi-soundwave"></i>
+          </div>
+          <div>
+            <div class="d-flex align-items-center gap-2">
+              <h1 class="h5 mb-0 fw-bold tracking-tight text-white">AccentLab Web <span class="text-emerald fw-semibold">v2.0</span></h1>
+              <span class="badge rounded-pill text-bg-info bg-opacity-25 text-info border border-info border-opacity-25 mono-font">
+                24kHz · 16-bit PCM
+              </span>
+              <span class="badge rounded-pill bg-emerald-subtle mono-font">
+                Maya 1984 · G2P + Glosa
+              </span>
+            </div>
+            <p class="small text-secondary mb-0">
+              Maya Yucateco (Norma Agosto 1984) &amp; Español Yucateco · Motor G2P + Silero VAD + Faster-Whisper + Praat DSP
+            </p>
+          </div>
+        </div>
+
+        <!-- KPIs Globales del Corpus -->
+        <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
+          <div class="kpi-pill">
+            <span class="kpi-label">Hablantes</span>
+            <span class="kpi-value mono-font" id="kpiSpeakers">0</span>
+          </div>
+          <div class="kpi-pill">
+            <span class="kpi-label">Clips (Validados)</span>
+            <span class="kpi-value mono-font" id="kpiSegments">0 <small class="text-secondary">(0)</small></span>
+          </div>
+          <div class="kpi-pill">
+            <span class="kpi-label">Audio Limpio</span>
+            <span class="kpi-value mono-font text-emerald" id="kpiDuration">0.00 min</span>
+          </div>
+          <div class="kpi-pill">
+            <span class="kpi-label">"Cantadito" Medio</span>
+            <span class="kpi-value mono-font text-cyan" id="kpiCantadito">0.00 ST</span>
+          </div>
+          <div class="kpi-pill">
+            <span class="kpi-label">Saltillos [ʔ]</span>
+            <span class="kpi-value mono-font text-amber" id="kpiGlottals">0</span>
+          </div>
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener"
+            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            title="Abrir documentación OpenAPI / Swagger"
+          >
+            <i class="bi bi-braces"></i>
+            <span class="d-none d-sm-inline">API Docs</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Contenedor de notificaciones Toast -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3 z-3" id="toastContainer"></div>
+
+  <!-- =====================================================================
+       CUERPO PRINCIPAL DEL DASHBOARD (4 PANELES INTEGRADOS)
+       ===================================================================== -->
+  <main class="container-fluid px-3 px-xl-4 py-4">
+    <div class="row g-4">
+      <!-- =================================================================
+           COLUMNA IZQUIERDA (PANEL 1 + PANEL 2)
+           ================================================================= -->
+      <div class="col-12 col-xl-5 d-flex flex-column gap-4">
+        <!-- ---------------------------------------------------------------
+             PANEL 1: REGISTRO DE HABLANTE Y GUION FONÉTICO
+             --------------------------------------------------------------- -->
+        <section class="studio-card" aria-labelledby="panel1Title">
+          <div class="studio-card-header">
+            <div class="d-flex align-items-center gap-2">
+              <span class="panel-step">01</span>
+              <h2 class="h6 mb-0 fw-semibold" id="panel1Title">
+                Perfil de Hablante &amp; Guion Fonético
+              </h2>
+            </div>
+            <button
+              class="btn btn-xs btn-outline-info"
+              type="button"
+              data-bs-toggle="collapse"
+              data-bs-target="#newSpeakerCollapse"
+              aria-expanded="false"
+              aria-controls="newSpeakerCollapse"
+              id="btnToggleSpeakerForm"
+            >
+              <i class="bi bi-person-plus-fill me-1"></i>Nuevo Hablante
+            </button>
+          </div>
+
+          <div class="studio-card-body">
+            <!-- Selector de hablante activo -->
+            <div class="mb-3">
+              <label for="activeSpeakerSelect" class="form-label small text-secondary mb-1">
+                Hablante Activo para Grabación / Carga VAD
+              </label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-dark-subtle border-secondary-subtle">
+                  <i class="bi bi-person-badge text-info"></i>
+                </span>
+                <select id="activeSpeakerSelect" class="form-select border-secondary-subtle">
+                  <option value="">-- Registra o selecciona un hablante --</option>
+                </select>
+                <button
+                  class="btn btn-outline-danger"
+                  type="button"
+                  id="btnDeleteSpeaker"
+                  title="Eliminar hablante seleccionado y sus audios"
+                >
+                  <i class="bi bi-trash3"></i>
+                </button>
+              </div>
+              <div id="activeSpeakerMeta" class="small text-secondary mt-1 mono-font"></div>
+            </div>
+
+            <!-- Formulario colapsable de alta rápida de hablante -->
+            <div class="collapse mb-3" id="newSpeakerCollapse">
+              <form id="speakerForm" class="speaker-form-box p-3 rounded-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="small fw-semibold text-info">
+                    <i class="bi bi-card-checklist me-1"></i>Registro Sociolingüístico Rápido
+                  </span>
+                  <span class="badge bg-secondary bg-opacity-25 text-secondary mono-font">Auto-ID</span>
+                </div>
+                <div class="row g-2">
+                  <div class="col-12 col-sm-7">
+                    <label class="form-label xsmall mb-1" for="spkName">Nombre o Alias *</label>
+                    <input
+                      type="text"
+                      id="spkName"
+                      class="form-control form-control-sm"
+                      placeholder="Ej. Don Wilberth / Informante Mérida"
+                      required
+                    />
+                  </div>
+                  <div class="col-6 col-sm-2">
+                    <label class="form-label xsmall mb-1" for="spkGender">Género *</label>
+                    <select id="spkGender" class="form-select form-select-sm" required>
+                      <option value="M">M</option>
+                      <option value="F">F</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </div>
+                  <div class="col-6 col-sm-3">
+                    <label class="form-label xsmall mb-1" for="spkAge">Edad *</label>
+                    <input
+                      type="number"
+                      id="spkAge"
+                      class="form-control form-control-sm"
+                      min="5"
+                      max="110"
+                      value="32"
+                      required
+                    />
+                  </div>
+                  <div class="col-6 col-sm-6">
+                    <label class="form-label xsmall mb-1" for="spkSubregion">Subregión *</label>
+                    <select id="spkSubregion" class="form-select form-select-sm">
+                      <option value="Centro">Centro (Mérida / Progreso)</option>
+                      <option value="Oriente">Oriente (Valladolid / Tizimín)</option>
+                      <option value="Sur">Sur (Ticul / Tekax / Oxkutzcab)</option>
+                      <option value="Poniente">Poniente (Hunucmá / Maxcanú)</option>
+                      <option value="Costa">Costa Yucateca</option>
+                      <option value="Otro">Otro (Contraste México)</option>
+                    </select>
+                  </div>
+                  <div class="col-6 col-sm-6">
+                    <label class="form-label xsmall mb-1" for="spkIntensity">Intensidad Percibida *</label>
+                    <select id="spkIntensity" class="form-select form-select-sm">
+                      <option value="Suave">Suave</option>
+                      <option value="Medio" selected>Medio</option>
+                      <option value="Marcado">Marcado</option>
+                    </select>
+                  </div>
+                  <div class="col-12 mt-2 d-flex justify-content-end gap-2">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      data-bs-toggle="collapse"
+                      data-bs-target="#newSpeakerCollapse"
+                    >
+                      Cancelar
+                    </button>
+                    <button type="submit" class="btn btn-sm btn-info fw-semibold text-dark">
+                      <i class="bi bi-check2-circle me-1"></i>Guardar y Seleccionar
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <hr class="border-secondary border-opacity-25 my-3" />
+
+            <!-- Selector de Idioma de Sesión (Maya 1984 / Español Yucateco / Auto) -->
+            <div class="mb-3">
+              <label for="sessionLanguageSelect" class="form-label small text-secondary mb-1 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-translate text-emerald me-1"></i>Idioma de Sesión (ASR + Motor Fonológico G2P)</span>
+                <span class="badge bg-emerald-subtle mono-font" id="sessionLangHintBadge">AUTO</span>
+              </label>
+              <select id="sessionLanguageSelect" class="form-select form-select-sm border-secondary-subtle">
+                <option value="auto" selected>Detección Automática (Maya 1984 + Español Yucateco)</option>
+                <option value="yua">Maya Yucateco [Norma 1984]</option>
+                <option value="es_yuc">Español Yucateco</option>
+              </select>
+            </div>
+
+            <!-- Selector de modo: Frases Trampa vs Habla Espontánea -->
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+              <span class="small fw-semibold text-light">Modo de Estímulo Fonético</span>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Modo de guion">
+                <input
+                  type="radio"
+                  class="btn-check"
+                  name="promptModeRadio"
+                  id="modeTrapPhrase"
+                  value="trap_phrase"
+                  checked
+                />
+                <label class="btn btn-outline-info" for="modeTrapPhrase">
+                  <i class="bi bi-chat-square-quote me-1"></i>Frases Trampa
+                </label>
+
+                <input
+                  type="radio"
+                  class="btn-check"
+                  name="promptModeRadio"
+                  id="modeSpontaneous"
+                  value="spontaneous"
+                />
+                <label class="btn btn-outline-info" for="modeSpontaneous">
+                  <i class="bi bi-mic me-1"></i>Habla Espontánea
+                </label>
+              </div>
+            </div>
+
+            <!-- Contenedor Carrusel de Frases Trampa -->
+            <div id="trapPhraseContainer" class="prompt-stage p-3 rounded-3">
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <select id="promptCategoryFilter" class="form-select form-select-sm w-auto">
+                  <option value="">Todas las categorías fonéticas</option>
+                </select>
+                <div class="d-flex align-items-center gap-1">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-dark border-secondary-subtle"
+                    id="btnPrevPrompt"
+                    title="Frase anterior"
+                  >
+                    <i class="bi bi-chevron-left"></i>
+                  </button>
+                  <span class="badge bg-dark border border-secondary-subtle mono-font" id="promptCounter">
+                    1 / 15
+                  </span>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-dark border-secondary-subtle"
+                    id="btnNextPrompt"
+                    title="Siguiente frase"
+                  >
+                    <i class="bi bi-chevron-right"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-dark border-secondary-subtle text-info"
+                    id="btnRandomPrompt"
+                    title="Frase aleatoria"
+                  >
+                    <i class="bi bi-shuffle"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div class="mb-2 d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div>
+                  <span class="badge bg-emerald-subtle mono-font me-1" id="promptLangBadge">YUA · 1984</span>
+                  <span class="badge text-bg-primary bg-opacity-25 text-info border border-info border-opacity-25" id="promptCategoryBadge">
+                    Maya 1984 — Saludos y Variantes Pragmáticas
+                  </span>
+                  <span class="ms-1 small text-secondary mono-font" id="promptIdBadge">MAYA_SAL_01</span>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-outline-info mono-font"
+                  id="btnSendPromptToG2p"
+                  title="Inspeccionar esta frase en el Laboratorio G2P Maya 1984"
+                >
+                  <i class="bi bi-Eyedropper"></i><i class="bi bi-bezier2 me-1"></i>Ver G2P / Glosa
+                </button>
+              </div>
+
+              <blockquote class="prompt-reading-text my-2" id="promptReadingText">
+                Cargando frases trampa fonéticas...
+              </blockquote>
+
+              <div class="xsmall text-secondary d-flex align-items-start gap-1 mt-2">
+                <i class="bi bi-bullseye text-warning mt-1"></i>
+                <span id="promptPhenomenonText"></span>
+              </div>
+            </div>
+
+            <!-- Contenedor Modo Habla Espontánea -->
+            <div id="spontaneousContainer" class="prompt-stage p-3 rounded-3 d-none">
+              <div class="d-flex align-items-center gap-2 text-emerald mb-1">
+                <i class="bi bi-stars"></i>
+                <strong class="small">Modo Habla Espontánea Natural</strong>
+              </div>
+              <p class="small text-secondary mb-0">
+                Pide al hablante relatar libremente una anécdota cotidiana, cómo preparar un platillo
+                regional o cómo llegar a un punto de su localidad (ideal entre <strong>4 y 9 segundos</strong>
+                por intervención para conservar prosodia espontánea genuina).
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------
+             PANEL 2: ESTUDIO DE GRABACIÓN Y CARGA DE AUDIOS LARGOS (VAD)
+             --------------------------------------------------------------- -->
+        <section class="studio-card" aria-labelledby="panel2Title">
+          <div class="studio-card-header">
+            <div class="d-flex align-items-center gap-2">
+              <span class="panel-step">02</span>
+              <h2 class="h6 mb-0 fw-semibold" id="panel2Title">
+                Estudio de Grabación &amp; Segmentación Silero VAD
+              </h2>
+            </div>
+            <ul class="nav nav-pills nav-pills-studio" id="studioTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button
+                  class="nav-link active"
+                  id="tab-mic-btn"
+                  data-bs-toggle="pill"
+                  data-bs-target="#tabMicPane"
+                  type="button"
+                  role="tab"
+                >
+                  <i class="bi bi-mic-fill me-1"></i>Micrófono
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button
+                  class="nav-link"
+                  id="tab-vad-btn"
+                  data-bs-toggle="pill"
+                  data-bs-target="#tabVadPane"
+                  type="button"
+                  role="tab"
+                >
+                  <i class="bi bi-scissors me-1"></i>Audio Largo (VAD)
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <div class="studio-card-body">
+            <div class="tab-content">
+              <!-- SUB-PANEL A: GRABADOR WEB EN VIVO -->
+              <div class="tab-pane fade show active" id="tabMicPane" role="tabpanel">
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                  <select id="micDeviceSelect" class="form-select form-select-sm w-auto flex-grow-1">
+                    <option value="">Micrófono predeterminado del sistema</option>
+                  </select>
+                  <div class="form-check form-switch mb-0" title="Desactiva AGC, supresión de ruido y eco del navegador para no alterar HNR/SNR ni cortes glotales">
+                    <input class="form-check-input" type="checkbox" id="rawDspSwitch" checked />
+                    <label class="form-check-label xsmall text-secondary" for="rawDspSwitch">
+                      Captura Pura DSP
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Visualizador Canvas Web Audio API (Onda + Espectro en vivo) -->
+                <div class="canvas-wrapper position-relative rounded-3 overflow-hidden mb-3">
+                  <canvas id="waveformCanvas" width="640" height="150"></canvas>
+                  <div class="canvas-overlay-top d-flex justify-content-between align-items-center px-3 py-2">
+                    <span class="badge bg-dark bg-opacity-75 border border-secondary-subtle mono-font" id="recStateBadge">
+                      <i class="bi bi-circle-fill text-secondary me-1" id="recDot"></i>LISTO
+                    </span>
+                    <span class="mono-font fw-bold fs-5 text-white" id="recTimer">00:00.0</span>
+                  </div>
+                  <div class="canvas-overlay-bottom px-3 py-1 d-flex justify-content-between xsmall text-secondary mono-font">
+                    <span>Rango óptimo TTS: 3.0s – 10.0s</span>
+                    <span id="rmsMeterText">Nivel: -- dBFS</span>
+                  </div>
+                </div>
+
+                <!-- Controles principales de grabación -->
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                  <button type="button" class="btn btn-danger flex-grow-1 fw-semibold" id="btnStartRec">
+                    <i class="bi bi-record-circle me-1"></i>Grabar
+                  </button>
+                  <button type="button" class="btn btn-warning flex-grow-1 fw-semibold d-none" id="btnStopRec">
+                    <i class="bi bi-stop-circle-fill me-1"></i>Detener Grabación
+                  </button>
+                </div>
+
+                <!-- Pre-escucha antes de enviar al servidor -->
+                <div id="previewBox" class="preview-box p-3 rounded-3 d-none">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small fw-semibold text-light">
+                      <i class="bi bi-headphones text-info me-1"></i>Escucha Previa del Clip Capturado
+                    </span>
+                    <span class="xsmall text-secondary mono-font" id="previewMimeInfo"></span>
+                  </div>
+                  <audio id="previewAudioPlayer" controls class="w-100 mb-2 studio-audio"></audio>
+                  <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnDiscardClip">
+                      <i class="bi bi-x-lg me-1"></i>Descartar
+                    </button>
+                    <button type="button" class="btn btn-sm btn-emerald flex-grow-1 fw-semibold" id="btnUploadRecordedClip">
+                      <i class="bi bi-cpu me-1"></i>Analizar Prosodia y Transcribir (Whisper)
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SUB-PANEL B: DRAG & DROP PARA AUDIOS LARGOS (SILERO VAD) -->
+              <div class="tab-pane fade" id="tabVadPane" role="tabpanel">
+                <div
+                  id="dropZone"
+                  class="drop-zone rounded-3 p-4 text-center mb-3"
+                  tabindex="0"
+                  role="button"
+                  aria-label="Zona para arrastrar o seleccionar archivos de audio largos"
+                >
+                  <input
+                    type="file"
+                    id="longAudioInput"
+                    class="d-none"
+                    accept=".wav,.mp3,.ogg,.m4a,.flac,.webm,audio/*"
+                  />
+                  <i class="bi bi-cloud-arrow-up display-6 text-info d-block mb-2"></i>
+                  <p class="mb-1 fw-semibold text-light">
+                    Arrastra aquí una entrevista, podcast o monólogo
+                  </p>
+                  <p class="xsmall text-secondary mb-2">
+                    WAV, MP3, OGG, M4A, FLAC o WebM · Conversión automática a WAV 24kHz Mono 16-bit
+                  </p>
+                  <span class="badge bg-dark border border-secondary-subtle mono-font" id="selectedLongFileName">
+                    Ningún archivo seleccionado
+                  </span>
+                </div>
+
+                <div class="row g-2 mb-3">
+                  <div class="col-4">
+                    <label class="form-label xsmall text-secondary mb-1" for="vadMinSec">Mín. (seg)</label>
+                    <input type="number" id="vadMinSec" class="form-control form-control-sm mono-font" value="3.0" step="0.5" min="1.5" max="8.0" />
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label xsmall text-secondary mb-1" for="vadMaxSec">Máx. (seg)</label>
+                    <input type="number" id="vadMaxSec" class="form-control form-control-sm mono-font" value="10.0" step="0.5" min="5.0" max="20.0" />
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label xsmall text-secondary mb-1" for="vadPadMs">Padding (ms)</label>
+                    <input type="number" id="vadPadMs" class="form-control form-control-sm mono-font" value="180" step="10" min="50" max="400" />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="btn btn-info text-dark fw-semibold w-100"
+                  id="btnProcessLongAudio"
+                  disabled
+                >
+                  <i class="bi bi-scissors me-1"></i>Segmentar con Silero VAD y Analizar Lote
+                </button>
+              </div>
+            </div>
+
+            <!-- Barra de estado de procesamiento DSP / ML -->
+            <div id="processingStatusBox" class="mt-3 p-3 rounded-3 processing-banner d-none">
+              <div class="d-flex align-items-center gap-3">
+                <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                <div>
+                  <div class="small fw-semibold text-light" id="processingTitle">
+                    Ejecutando pipeline acústico y neuronal...
+                  </div>
+                  <div class="xsmall text-secondary" id="processingSubtitle">
+                    Normalizando a 24kHz PCM · Extrayendo F0/Formantes/Saltillos · Faster-Whisper ASR
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- =================================================================
+           COLUMNA DERECHA (PANEL 3: ANALIZADOR VISUAL DE ACENTO EN TIEMPO REAL)
+           ================================================================= -->
+      <div class="col-12 col-xl-7">
+        <section class="studio-card h-100" aria-labelledby="panel3Title">
+          <div class="studio-card-header flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <span class="panel-step">03</span>
+              <h2 class="h6 mb-0 fw-semibold" id="panel3Title">
+                Analizador Visual de Acento, Motor G2P Maya 1984 &amp; Glosa
+              </h2>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <span class="badge bg-emerald-subtle mono-font d-none" id="activeLangBadge">YUA · 1984</span>
+              <span class="badge bg-purple-subtle mono-font d-none" id="activeAlignmentBadge" title="Cumplimiento acústico en Praat frente al perfil fonológico esperado del motor G2P">
+                Alineación G2P: --%
+              </span>
+              <span class="badge bg-dark border border-secondary-subtle mono-font" id="activeClipBadge">
+                Sin clip seleccionado
+              </span>
+            </div>
+          </div>
+
+          <div class="studio-card-body">
+            <!-- Barra de reproducción del segmento analizado -->
+            <div class="analyzer-player-bar p-2 px-3 rounded-3 mb-3 d-flex flex-wrap align-items-center justify-content-between gap-2">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-file-earmark-music text-info fs-5"></i>
+                <div>
+                  <div class="small fw-semibold text-light mono-font" id="analyzedFilename">
+                    Selecciona o graba un clip para inspeccionar su prosodia
+                  </div>
+                  <div class="xsmall text-secondary" id="analyzedSpeakerSub">
+                    Los resultados acústicos aparecerán aquí automáticamente.
+                  </div>
+                </div>
+              </div>
+              <audio id="analyzedAudioPlayer" controls class="studio-audio-compact d-none"></audio>
+            </div>
+
+            <!-- 6 Tarjetas de Métricas Acústicas -->
+            <div class="row g-2 mb-3">
+              <div class="col-6 col-md-4 col-xxl-2">
+                <div class="metric-tile">
+                  <span class="metric-title">F0 Medio</span>
+                  <div class="metric-val mono-font text-info" id="metricF0Mean">-- Hz</div>
+                  <span class="metric-sub mono-font" id="metricF0Range">Rango: --</span>
+                </div>
+              </div>
+              <div class="col-6 col-md-4 col-xxl-2">
+                <div class="metric-tile">
+                  <span class="metric-title">Variación "Cantadito"</span>
+                  <div class="metric-val mono-font text-cyan" id="metricStStd">-- ST</div>
+                  <span class="metric-sub mono-font" id="metricStRange">Excursión: --</span>
+                </div>
+              </div>
+              <div class="col-6 col-md-4 col-xxl-2">
+                <div class="metric-tile">
+                  <span class="metric-title">Cortes Glotales [ʔ]</span>
+                  <div class="metric-val mono-font text-amber" id="metricGlottalCount">--</div>
+                  <span class="metric-sub mono-font text-truncate d-block" id="metricGlottalTimes" title="">
+                    Caídas &lt;20ms
+                  </span>
+                </div>
+              </div>
+              <div class="col-6 col-md-4 col-xxl-2">
+                <div class="metric-tile">
+                  <span class="metric-title">Formantes F1 / F2</span>
+                  <div class="metric-val mono-font text-purple" id="metricFormants">-- / --</div>
+                  <span class="metric-sub mono-font">Núcleos vocálicos (Hz)</span>
+                </div>
+              </div>
+              <div class="col-6 col-md-4 col-xxl-2">
+                <div class="metric-tile">
+                  <span class="metric-title">HNR / SNR</span>
+                  <div class="metric-val mono-font text-emerald" id="metricHnrSnr">-- / --</div>
+                  <span class="metric-sub mono-font" id="metricVoiced">Sonoridad: --%</span>
+                </div>
+              </div>
+              <div class="col-6 col-md-4 col-xxl-2">
+                <div class="metric-tile">
+                  <span class="metric-title">Confianza Whisper</span>
+                  <div class="metric-val mono-font text-light" id="metricConfidence">--%</div>
+                  <span class="metric-sub mono-font" id="metricDuration">Duración: --s</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gráficas gemelas en Chart.js: Curva del Cantadito (30 pts ST) + Mapa de Vocales F1/F2 -->
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-lg-7">
+                <div class="chart-panel p-3 rounded-3 h-100">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                      <h3 class="small fw-semibold mb-0 text-light">
+                        Curva de Entonación Normalizada ("Cantadito")
+                      </h3>
+                      <span class="xsmall text-secondary">
+                        30 puntos equidistantes · Semitonos relativos a la mediana del hablante (0 ST)
+                      </span>
+                    </div>
+                    <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 mono-font">
+                      12·log₂(F0/F0ₘₑ𝒹)
+                    </span>
+                  </div>
+                  <div class="chart-box">
+                    <canvas id="pitchCurveChart"></canvas>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12 col-lg-5">
+                <div class="chart-panel p-3 rounded-3 h-100">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                      <h3 class="small fw-semibold mb-0 text-light">
+                        Mapa Acústico Vocálico (F1 / F2)
+                      </h3>
+                      <span class="xsmall text-secondary">
+                        Ejes fonéticos invertidos (Hz) + anclas /i e a o u/
+                      </span>
+                    </div>
+                    <span class="badge bg-purple-subtle mono-font">Burg LPC</span>
+                  </div>
+                  <div class="chart-box">
+                    <canvas id="vowelSpaceChart"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Transcripción generada por Faster-Whisper y corrección manual de modismos -->
+            <div class="transcript-editor-box p-3 rounded-3">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <label for="transcriptEditor" class="small fw-semibold text-light mb-0">
+                  <i class="bi bi-pencil-square text-info me-1"></i>Transcripción Ortográfica / Modismos Regionales (Faster-Whisper)
+                </label>
+                <div class="d-flex align-items-center gap-3">
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="segmentValidatedSwitch" checked disabled />
+                    <label class="form-check-label xsmall text-secondary" for="segmentValidatedSwitch">
+                      Validado para exportación TTS
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-info text-dark fw-semibold"
+                    id="btnSaveTranscript"
+                    disabled
+                  >
+                    <i class="bi bi-floppy me-1"></i>Guardar Transcripción
+                  </button>
+                </div>
+              </div>
+              <textarea
+                id="transcriptEditor"
+                rows="2"
+                class="form-control form-control-sm mb-2"
+                placeholder="Aquí aparecerá la transcripción automática de faster-whisper para corregir modismos como 'boxito', 'xix', 'tuch', 'mare'..."
+                disabled
+              ></textarea>
+              <div class="d-flex flex-wrap justify-content-between align-items-center xsmall text-secondary gap-2">
+                <span id="rawWhisperReference">Salida cruda Whisper: --</span>
+                <span id="glottalBadgesContainer" class="mono-font"></span>
+              </div>
+            </div>
+
+            <!-- =============================================================
+                 LABORATORIO FONOLÓGICO G2P MAYA 1984 Y GLOSA GRAMATICAL
+                 ============================================================= -->
+            <div class="maya-lab-card p-3 rounded-3 mt-3" id="mayaG2pLabCard">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <div class="d-flex align-items-center gap-2">
+                  <span class="maya-lab-icon"><i class="bi bi-diagram-3-fill"></i></span>
+                  <div>
+                    <h3 class="small fw-bold mb-0 text-white">
+                      Laboratorio Fonológico G2P Maya 1984 y Glosa Gramatical
+                    </h3>
+                    <span class="xsmall text-secondary">
+                      Alfabeto Práctico de Agosto de 1984 · Desambiguación de Apóstrofos (<code>C'</code> · <code>V'V</code> · <code>V'</code> · <code>'V</code>) &amp; Glosa Leipzig
+                    </span>
+                  </div>
+                </div>
+                <span class="badge bg-emerald-subtle mono-font" id="g2pDetectedLangBadge">
+                  Maya Yucateco (1984)
+                </span>
+              </div>
+
+              <!-- 1) Probador G2P en Vivo -->
+              <div class="g2p-tester-bar p-2 rounded-3 mb-3">
+                <label for="liveG2pInput" class="xsmall fw-semibold text-info d-block mb-1">
+                  <i class="bi bi-lightning-charge-fill me-1"></i>Probador G2P y Analizador Morfosintáctico en Vivo (escribe cualquier frase en maya o pre-1984 antes de grabarla)
+                </label>
+                <div class="input-group input-group-sm mb-2">
+                  <input
+                    type="text"
+                    id="liveG2pInput"
+                    class="form-control mono-font"
+                    value="Ma'alob u sáastal k'iin"
+                    placeholder="Ej. Ma'alob u sáastal k'iin / Yutsil ja'atskab / Tz'o'ok in janal..."
+                  />
+                  <button type="button" class="btn btn-info text-dark fw-semibold" id="btnRunLiveG2p">
+                    <i class="bi bi-magic me-1"></i>Analizar
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline-light"
+                    id="btnUseLiveG2pAsPrompt"
+                    title="Usar esta frase normalizada como estímulo activo para grabar con el micrófono"
+                  >
+                    <i class="bi bi-mic-fill me-1"></i>Usar para Grabar
+                  </button>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-1 xsmall">
+                  <span class="text-secondary me-1">Ejemplos rápidos:</span>
+                  <button type="button" class="btn btn-xs btn-dark border-secondary-subtle mono-font g2p-preset-btn" data-phrase="Ma'alob k'iin">Ma'alob k'iin</button>
+                  <button type="button" class="btn btn-xs btn-dark border-secondary-subtle mono-font g2p-preset-btn" data-phrase="Yutsil ja'atskab">Yutsil ja'atskab</button>
+                  <button type="button" class="btn btn-xs btn-dark border-secondary-subtle mono-font g2p-preset-btn" data-phrase="Ma'alob u sáastal k'iin">Ma'alob u sáastal k'iin</button>
+                  <button type="button" class="btn btn-xs btn-dark border-secondary-subtle mono-font g2p-preset-btn" data-phrase="Jach k'a'ana'an in kanik maaya t'aan">k'a'ana'an (V'V)</button>
+                  <button type="button" class="btn btn-xs btn-dark border-secondary-subtle mono-font g2p-preset-btn" data-phrase="Le ch'íich'o' táan u k'aay yóok'ol le k'áak'o'">ch'íich' / k'áak' (C')</button>
+                  <button type="button" class="btn btn-xs btn-dark border-secondary-subtle mono-font g2p-preset-btn" data-phrase="Tz'o'ok in janal">Tz'o'ok → Ts'o'ok (Norma 84)</button>
+                </div>
+              </div>
+
+              <!-- Leyenda cromática fonológica -->
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <div class="d-flex flex-wrap align-items-center gap-1 xsmall">
+                  <span class="text-secondary me-1">Código fonológico:</span>
+                  <span class="phon-badge phon-ejective" title="Tipo 1: Consonantes glotalizadas eyectivas (ch', ts', k', p', t')">Eyectivas C'</span>
+                  <span class="phon-badge phon-reart" title="Tipo 2: Vocales rearticuladas laringalizadas intervocálicas (V₁'V₁)">Rearticuladas V'V</span>
+                  <span class="phon-badge phon-glottal" title="Tipo 3/4: Cierre glotal posvocálico (V') o ataque prevocálico ('V)">Cierres Glotales V' / ʔ</span>
+                  <span class="phon-badge phon-hightone" title="Vocales largas o cortas con tono alto (áa, ée, íi, óo, úu)">Tono Alto V́V</span>
+                  <span class="phon-badge phon-lowlong" title="Vocales largas con tono bajo sostenido (aa, ee, ii, oo, uu)">Larga Baja VV</span>
+                  <span class="phon-badge phon-implosive" title="Consonante bilabial implosiva maya /ɓ/">Implosiva /ɓ/</span>
+                </div>
+                <span class="xsmall mono-font text-secondary" id="g2pNormLabel">
+                  Norma 1984: <strong class="text-white" id="g2pNormalizedText">--</strong>
+                </span>
+              </div>
+
+              <!-- 2) Salida AFI (IPA) y Tokens TTS con código de colores -->
+              <div class="row g-2 mb-2">
+                <div class="col-12 col-md-6">
+                  <div class="phon-output-box p-2 px-3 rounded-3 h-100">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                      <span class="xsmall text-secondary text-uppercase fw-semibold">Transcripción AFI (IPA)</span>
+                      <span class="xsmall mono-font text-info" id="g2pRawIpaString">[]</span>
+                    </div>
+                    <div class="mono-font d-flex flex-wrap gap-1 align-items-center" id="g2pIpaColoredContainer">
+                      <span class="text-secondary xsmall">--</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12 col-md-6">
+                  <div class="phon-output-box p-2 px-3 rounded-3 h-100">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                      <span class="xsmall text-secondary text-uppercase fw-semibold">Tokens Fonéticos TTS (XTTS / VITS / Piper)</span>
+                      <span class="xsmall mono-font text-emerald">Sin pausas falsas</span>
+                    </div>
+                    <div class="mono-font d-flex flex-wrap gap-1 align-items-center" id="g2pTtsColoredContainer">
+                      <span class="text-secondary xsmall">--</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Desglose de los 4 tipos de apóstrofo + Perfil Acústico Esperado -->
+              <div class="d-flex flex-wrap gap-2 mb-3 xsmall mono-font" id="g2pApostropheSummary"></div>
+
+              <!-- 3) Glosa Interlineal Morfosintáctica (Leipzig) y Traducción Semántico-Pragmática -->
+              <div class="grammar-box p-2 px-3 rounded-3">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                  <div>
+                    <div class="xsmall text-secondary text-uppercase fw-semibold">Sentido Semántico y Estructura</div>
+                    <div class="fw-semibold text-emerald" id="gramSemanticTranslation">--</div>
+                    <div class="xsmall text-secondary">
+                      Glosa literal: <span class="text-light mono-font" id="gramLiteralGloss">--</span>
+                    </div>
+                  </div>
+                  <span class="badge bg-dark border border-secondary-subtle text-info xsmall" id="gramSyntacticStructure">--</span>
+                </div>
+
+                <!-- Tarjetas Interlineales Palabra por Palabra -->
+                <div class="d-flex flex-wrap gap-2 my-2" id="gramMorphemeCards"></div>
+
+                <!-- Notas pragmáticas y variantes equivalentes -->
+                <div class="xsmall text-secondary mt-2 pt-2 border-top border-secondary border-opacity-25" id="gramPragmaticFooter">
+                  <div id="gramPragmaticNotes"></div>
+                  <div id="gramEquivalentVariants" class="mt-1"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- =================================================================
+           FILA INFERIOR COMPLETA (PANEL 4: EXPLORADOR DEL DATASET Y EXPORTACIÓN)
+           ================================================================= -->
+      <div class="col-12">
+        <section class="studio-card" aria-labelledby="panel4Title">
+          <div class="studio-card-header flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <span class="panel-step">04</span>
+              <h2 class="h6 mb-0 fw-semibold" id="panel4Title">
+                Explorador del Dataset SQLite &amp; Exportación (Maya 1984 / AFI / Tokens TTS / XTTS-v2)
+              </h2>
+            </div>
+
+            <!-- Barra de Exportación Directa -->
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <input
+                type="text"
+                id="exportDatasetName"
+                class="form-control form-control-sm mono-font w-auto"
+                value="accentlab_maya1984_tts"
+                title="Nombre base de la carpeta y archivo ZIP de exportación"
+              />
+              <select
+                id="exportTextFormat"
+                class="form-select form-select-sm mono-font w-auto"
+                title="Formato del campo de texto en metadata.csv"
+              >
+                <option value="orthographic_1984" selected>Formato: Ortografía 1984</option>
+                <option value="ipa_phonemes">Formato: Fonemas AFI (IPA)</option>
+                <option value="tts_tokens">Formato: Tokens Fonéticos TTS</option>
+                <option value="dual_orth_ipa">Formato: Dual (Ortografía + AFI)</option>
+              </select>
+              <div class="input-group input-group-sm w-auto" title="SNR mínimo en dB para incluir clips">
+                <span class="input-group-text bg-dark-subtle border-secondary-subtle xsmall">SNR mín.</span>
+                <input
+                  type="number"
+                  id="exportMinSnr"
+                  class="form-control form-control-sm mono-font"
+                  style="width: 68px"
+                  placeholder="0"
+                  min="0"
+                  max="50"
+                  step="1"
+                />
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-emerald fw-semibold"
+                id="btnExportDataset"
+              >
+                <i class="bi bi-box-seam me-1"></i>Exportar Dataset
+              </button>
+            </div>
+          </div>
+
+          <div class="studio-card-body">
+            <!-- Banner de resultado de exportación (oculto hasta exportar) -->
+            <div id="exportResultBanner" class="export-banner p-3 rounded-3 mb-3 d-none"></div>
+
+            <!-- Filtros del Explorador -->
+            <div class="row g-2 align-items-center mb-3">
+              <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text bg-dark-subtle border-secondary-subtle">
+                    <i class="bi bi-search"></i>
+                  </span>
+                  <input
+                    type="search"
+                    id="filterSearchInput"
+                    class="form-control"
+                    placeholder="Buscar texto maya/español, AFI, código..."
+                  />
+                </div>
+              </div>
+              <div class="col-6 col-md-2">
+                <select id="filterSpeakerSelect" class="form-select form-select-sm">
+                  <option value="">Todos los hablantes</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-2">
+                <select id="filterLanguageSelect" class="form-select form-select-sm">
+                  <option value="">Todos los idiomas</option>
+                  <option value="yua">Maya Yucateco (1984)</option>
+                  <option value="es_yuc">Español Yucateco</option>
+                  <option value="yua_es">Bilingüe (Maya/Esp)</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-2">
+                <select id="filterSubregionSelect" class="form-select form-select-sm">
+                  <option value="">Todas las subregiones</option>
+                  <option value="Centro">Centro</option>
+                  <option value="Oriente">Oriente</option>
+                  <option value="Sur">Sur</option>
+                  <option value="Poniente">Poniente</option>
+                  <option value="Costa">Costa</option>
+                  <option value="Otro">Otro</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-1">
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="filterValidatedOnly" />
+                  <label class="form-check-label xsmall text-secondary" for="filterValidatedOnly">
+                    Validados
+                  </label>
+                </div>
+              </div>
+              <div class="col-12 col-md-2 text-end">
+                <button type="button" class="btn btn-sm btn-outline-secondary w-100" id="btnRefreshSegments">
+                  <i class="bi bi-arrow-clockwise me-1"></i>Actualizar Tabla
+                </button>
+              </div>
+            </div>
+
+            <!-- Resumen Dialectal por Subregión -->
+            <div id="subregionBreakdownBar" class="d-flex flex-wrap gap-2 mb-3"></div>
+
+            <!-- Tabla de Segmentos -->
+            <div class="table-responsive rounded-3 border border-secondary border-opacity-25">
+              <table class="table table-dark table-hover align-middle mb-0 studio-table">
+                <thead>
+                  <tr>
+                    <th scope="col">ID / Hablante</th>
+                    <th scope="col">Audio (24kHz WAV)</th>
+                    <th scope="col" style="min-width: 280px">Transcripción (Editable)</th>
+                    <th scope="col" class="text-center">Duración</th>
+                    <th scope="col" class="text-center">F0 / Cantadito</th>
+                    <th scope="col" class="text-center">Saltillos [ʔ]</th>
+                    <th scope="col" class="text-center">SNR / HNR</th>
+                    <th scope="col" class="text-center">Estado</th>
+                    <th scope="col" class="text-end">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="segmentsTableBody">
+                  <tr>
+                    <td colspan="9" class="text-center text-secondary py-4">
+                      Cargando segmentos desde SQLite...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- Dependencias JS (Bootstrap Bundle + Chart.js 4) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+  <!-- Lógica Principal de AccentLab Web -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
